@@ -52,14 +52,17 @@
         "(stays on after release).",
         "",
         "LATCH: Shift + hold pad",
-        "  Pad pulses = latched",
+        "  Pad turns red = latched",
         "",
         "UNLATCH: Shift + hold",
         "  the latched pad again",
         "",
-        "Multiple FX can be",
-        "latched at once for",
-        "layered effects."
+        "Also: hold pad, then",
+        "press Shift to toggle.",
+        "",
+        "Tap a latched pad to",
+        "select it for E4-E6",
+        "knob editing."
       ]
     },
     {
@@ -68,17 +71,50 @@
         "Touch any knob to see",
         "what it controls.",
         "",
-        "E1: Repeat Length",
+        "E1: Repeat Length (time)",
         "E2: Repeat Speed",
-        "E3: Repeat On/Off",
-        "  (turn right=on, left=off)",
-        "E4-E6: Per-FX params",
+        "  (center=normal)",
+        "E3: Repeat Loop On/Off",
+        "  (right=on, left=off)",
+        "",
+        "E4: Per-FX param 1",
+        "E5: Per-FX param 2",
+        "E6: Per-FX param 3",
         "  (last touched pad)",
+        "",
         "E7: Tilt EQ",
         "E8: DJ Filter",
         "",
         "Volume knob: host volume",
         "  (always pass-through)"
+      ]
+    },
+    {
+      "title": "Per-FX Params (E4-E6)",
+      "lines": [
+        "Tap a pad to select it,",
+        "then use E4/E5/E6.",
+        "",
+        "Repeats: Filter Gate ---",
+        "Scatter: Pattrn Gate Rev",
+        "Reverse: Fdbk Filter Mix",
+        "Stretch: Tone WowFl Mix",
+        "",
+        "Filters: Speed Reso Dep",
+        "BP:      Speed Reso Wid",
+        "Phaser:  Depth Fdbk Mix",
+        "AutoFlt: Depth Centr Res",
+        "",
+        "Delays: Feedbk Tone Lvl",
+        "Reverbs: Time Tone Lvl",
+        "",
+        "Crush:   Filter Tone Mix",
+        "Saturate: Drive Tone Mix",
+        "Gate:    Speed Shape Dep",
+        "Tremolo: Rate Depth Wave",
+        "Oct Dn:  Tone WowFl Mix",
+        "Vinyl:   Noise WowFl Ton",
+        "VnlBrk:  Speed Tone Mix"
       ]
     },
     {
@@ -106,7 +142,10 @@
       "title": "Bypass",
       "lines": [
         "Undo button: Bypass",
-        "  Tap = toggle on/off",
+        "",
+        "Tap = toggle on/off",
+        "Hold = momentary bypass",
+        "  (release to resume)",
         "",
         "When bypassed, audio",
         "passes through dry.",
@@ -117,18 +156,20 @@
       ]
     },
     {
-      "title": "Other Controls",
+      "title": "Tempo & Controls",
       "lines": [
         "Jog click: Tap tempo",
         "  (tap 2+ times)",
         "",
+        "Jog turn:",
+        "  Coarse BPM (+/- 1)",
+        "",
         "Shift+Jog turn:",
-        "  Fine BPM adjustment",
+        "  Fine BPM (+/- 0.5)",
         "",
-        "Undo: Bypass toggle",
-        "  Tap = bypass on/off",
+        "BPM range: 20-300",
         "",
-        "Back: Exit PFX"
+        "Back: Exit Performance FX"
       ]
     },
     {
@@ -150,7 +191,10 @@
         "",
         "- Repeat rate knob",
         "  changes take effect",
-        "  immediately"
+        "  immediately",
+        "",
+        "- Tap latched pads to",
+        "  select for knob tweaks"
       ]
     }
   ]
