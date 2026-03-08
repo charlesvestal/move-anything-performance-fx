@@ -43,7 +43,7 @@ static const char *CONT_NAMES[PFX_NUM_CONTINUOUS] = {
     "Delay", "Ping-Pong", "Tape Echo", "Auto-Filter",
     "Plate Verb", "Dark Verb", "Spring Verb", "Shimmer",
     "Chorus", "Phaser", "Flanger", "Trem/Pan",
-    "Compressor", "Saturator", "Ring Mod", "Freeze"
+    "Compressor", "Saturator", "Pitch Shift", "Freeze"
 };
 
 /* Continuous FX parameter names (4 main params per effect) */
@@ -62,7 +62,7 @@ static const char *CONT_PARAM_NAMES[PFX_NUM_CONTINUOUS][4] = {
     {"Rate", "Depth", "Shape", "Mix"},              /* Trem/Pan */
     {"Thresh", "Ratio", "Attack", "Mix"},          /* Compressor */
     {"Drive", "Tone", "Curve", "Mix"},             /* Saturator */
-    {"Freq", "Depth", "Tone", "Mix"},              /* Ring Mod */
+    {"Pitch", "Grain", "Quality", "Mix"},            /* Pitch Shift */
     {"Position", "Decay", "Pitch", "Mix"}          /* Freeze */
 };
 

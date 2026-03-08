@@ -1428,32 +1428,68 @@ static void process_cont_saturator(continuous_t *c, float *l, float *r) {
     *r = dry_r * (1.0f - mix) + *r * mix;
 }
 
-/* Ring modulator: [0]=freq, [1]=depth, [2]=tone, [3]=mix */
-static void process_cont_ring_mod(continuous_t *c, float *l, float *r) {
-    ring_mod_t *rm = &c->ring;
-    float freq = 20.0f + c->params[0] * 2000.0f;
-    float depth = c->params[1];
+/* Pitch shift: [0]=pitch (0=octave down, 0.5=unity, 1=octave up),
+ * [1]=grain size, [2]=quality/overlap, [3]=mix,
+ * [4]=fine tune, [5]=feedback, [6]=tone, [7]=unused */
+static void process_cont_pitch_shift(continuous_t *c, float *l, float *r) {
+    mod_delay_t *md = &c->mod_delay;
+    float pitch_param = c->params[0];
+    float grain_sz = 0.01f + c->params[1] * 0.04f; /* 10-50ms in seconds */
     float mix = c->params[3];
+    float fine = (c->params[4] - 0.5f) * 0.1f; /* +/- 5% fine tune */
+    float fb = c->params[5] * 0.6f;
+    float tone = c->params[6];
 
-    rm->phase += freq / PFX_SAMPLE_RATE;
-    if (rm->phase >= 1.0f) rm->phase -= 1.0f;
+    /* Pitch ratio: 0.5 (octave down) to 2.0 (octave up) */
+    float ratio = powf(2.0f, (pitch_param - 0.5f) * 2.0f + fine);
 
-    float mod = sinf(rm->phase * 2.0f * M_PI);
-    float ring = 1.0f - depth + depth * mod;
+    int grain_len = (int)(grain_sz * PFX_SAMPLE_RATE);
+    if (grain_len < 256) grain_len = 256;
+    if (grain_len > md->buf_len / 2) grain_len = md->buf_len / 2;
+
+    /* Write input + feedback to buffer */
+    int wp = md->write_pos;
+    int fb_pos = (wp - grain_len + md->buf_len) % md->buf_len;
+    md->buf_l[wp] = *l + md->buf_l[fb_pos] * fb;
+    md->buf_r[wp] = *r + md->buf_r[fb_pos] * fb;
+    md->write_pos = (wp + 1) % md->buf_len;
+
+    /* Two overlapping grains for smooth output */
+    float out_l = 0.0f, out_r = 0.0f;
+    for (int g = 0; g < 2; g++) {
+        float phase = md->lfo_phase + (float)g * 0.5f;
+        if (phase >= 1.0f) phase -= 1.0f;
+
+        /* Read position based on pitch ratio */
+        float delay = (float)grain_len * phase * ratio;
+        if (delay >= (float)(md->buf_len - 1)) delay = (float)(md->buf_len - 2);
+        int rp = (wp - (int)delay + md->buf_len) % md->buf_len;
+
+        float gl = md->buf_l[rp];
+        float gr = md->buf_r[rp];
+
+        /* Hanning window */
+        float env = sinf(phase * M_PI);
+        out_l += gl * env;
+        out_r += gr * env;
+    }
+
+    /* Advance grain phase */
+    md->lfo_phase += 1.0f / (float)grain_len;
+    if (md->lfo_phase >= 1.0f) md->lfo_phase -= 1.0f;
+
+    /* Tone filter */
+    if (tone < 0.95f) {
+        float f = cutoff_to_f(0.3f + tone * 0.65f);
+        float fl, fr;
+        svf_process(&c->filter_l, out_l, f, 0.5f, &fl, NULL, NULL);
+        svf_process(&c->filter_r, out_r, f, 0.5f, &fr, NULL, NULL);
+        out_l = fl; out_r = fr;
+    }
 
     float dry_l = *l, dry_r = *r;
-    *l *= ring;
-    *r *= ring;
-
-    /* Tone filter - stereo */
-    float f = cutoff_to_f(0.2f + c->params[2] * 0.6f);
-    float fl, fr;
-    svf_process(&c->filter_l, *l, f, 0.4f, &fl, NULL, NULL);
-    svf_process(&c->filter_r, *r, f, 0.4f, &fr, NULL, NULL);
-    *l = fl; *r = fr;
-
-    *l = dry_l * (1.0f - mix) + *l * mix;
-    *r = dry_r * (1.0f - mix) + *r * mix;
+    *l = dry_l * (1.0f - mix) + out_l * mix;
+    *r = dry_r * (1.0f - mix) + out_r * mix;
 }
 
 /* Freeze: [0]=freeze_pos, [1]=decay, [2]=pitch_shift, [3]=mix */
@@ -1525,7 +1561,7 @@ static void process_continuous_fx(continuous_t *c, int type,
         case CONT_TREMOLO_PAN:   process_cont_tremolo_pan(c, l, r); break;
         case CONT_COMPRESSOR:    process_cont_compressor(c, l, r); break;
         case CONT_SATURATOR:     process_cont_saturator(c, l, r); break;
-        case CONT_RING_MOD:      process_cont_ring_mod(c, l, r); break;
+        case CONT_PITCH_SHIFT:   process_cont_pitch_shift(c, l, r); break;
         case CONT_FREEZE:        process_cont_freeze(c, l, r); break;
     }
 }
