@@ -1,5 +1,6 @@
 build/
 dist/
 test_pfx
+test_perf_fx
 *.o
 *.so
