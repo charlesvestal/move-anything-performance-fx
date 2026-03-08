@@ -43,7 +43,7 @@ static const char *CONT_NAMES[PFX_NUM_CONTINUOUS] = {
     "Delay", "Ping-Pong", "Tape Echo", "Auto-Filter",
     "Plate Verb", "Dark Verb", "Spring Verb", "Shimmer",
     "Chorus", "Phaser", "Flanger", "Trem/Pan",
-    "Compressor", "Saturator", "Pitch Shift", "Freeze"
+    "Compressor", "Saturator", "Pitch Shift", "Ducker"
 };
 
 /* Continuous FX parameter names (4 main params per effect) */
@@ -63,7 +63,7 @@ static const char *CONT_PARAM_NAMES[PFX_NUM_CONTINUOUS][4] = {
     {"Thresh", "Ratio", "Attack", "Mix"},          /* Compressor */
     {"Drive", "Tone", "Curve", "Mix"},             /* Saturator */
     {"Pitch", "Grain", "Quality", "Mix"},            /* Pitch Shift */
-    {"Position", "Decay", "Pitch", "Mix"}          /* Freeze */
+    {"Rate", "Depth", "Shape", "Mix"}               /* Ducker */
 };
 
 typedef struct {

@@ -74,7 +74,7 @@ enum {
     CONT_COMPRESSOR,
     CONT_SATURATOR,
     CONT_PITCH_SHIFT,
-    CONT_FREEZE
+    CONT_DUCKER
 };
 
 /* ---- State Variable Filter ---- */

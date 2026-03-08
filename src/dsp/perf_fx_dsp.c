@@ -1492,58 +1492,76 @@ static void process_cont_pitch_shift(continuous_t *c, float *l, float *r) {
     *r = dry_r * (1.0f - mix) + out_r * mix;
 }
 
-/* Freeze: [0]=freeze_pos, [1]=decay, [2]=pitch_shift, [3]=mix */
-static void process_cont_freeze(continuous_t *c, float *l, float *r) {
-    freeze_t *fz = &c->freeze;
+/* Continuous Ducker: [0]=rate, [1]=depth, [2]=shape, [3]=mix
+ * [4]=attack, [5]=release, [6]=swing, [7]=unused
+ * Uses engine BPM for tempo sync. */
+static void process_cont_ducker(continuous_t *c, float *l, float *r,
+                                 perf_fx_engine_t *e) {
+    float rate_param = c->params[0];
+    float depth = c->params[1];
+    float shape = c->params[2];
     float mix = c->params[3];
-    float pitch = 0.5f + c->params[2] * 1.5f;
+    float attack = 0.001f + c->params[4] * 0.05f; /* 1-50ms */
+    float release_time = 0.01f + c->params[5] * 0.5f; /* 10-500ms */
+    float swing = c->params[6] * 0.3f;
 
-    if (!fz->captured) {
-        /* Capture a grain from current audio */
-        fz->buf_l[(int)fz->read_pos % PFX_FREEZE_GRAIN] = *l;
-        fz->buf_r[(int)fz->read_pos % PFX_FREEZE_GRAIN] = *r;
-        fz->read_pos += 1.0f;
-        if (fz->read_pos >= PFX_FREEZE_GRAIN) {
-            fz->captured = 1;
-            fz->grain_len = PFX_FREEZE_GRAIN;
-            fz->read_pos = 0.0f;
-        }
-        return; /* Pass through while capturing */
+    /* Rate: 0=1bar, 0.25=1/2, 0.5=1/4, 0.75=1/8, 1.0=1/16 */
+    float div;
+    if (rate_param < 0.15f) div = 4.0f;       /* 1 bar */
+    else if (rate_param < 0.35f) div = 2.0f;   /* 1/2 */
+    else if (rate_param < 0.55f) div = 1.0f;   /* 1/4 */
+    else if (rate_param < 0.75f) div = 0.5f;   /* 1/8 */
+    else div = 0.25f;                           /* 1/16 */
+
+    float samples_per_beat = (60.0f / e->bpm) * PFX_SAMPLE_RATE * div;
+    float phase_inc = 1.0f / samples_per_beat;
+
+    /* Advance phase — reuse ring.phase field */
+    c->ring.phase += phase_inc;
+    if (c->ring.phase >= 1.0f) {
+        c->ring.phase -= 1.0f;
     }
 
-    /* Read from frozen grain with crossfade */
-    int pos0 = ((int)fz->read_pos) % fz->grain_len;
-    int pos1 = (pos0 + 1) % fz->grain_len;
-    float frac = fz->read_pos - (int)fz->read_pos;
-
-    float wet_l = fz->buf_l[pos0] + frac * (fz->buf_l[pos1] - fz->buf_l[pos0]);
-    float wet_r = fz->buf_r[pos0] + frac * (fz->buf_r[pos1] - fz->buf_r[pos0]);
-
-    /* Crossfade envelope at grain boundaries */
-    float norm_pos = fz->read_pos / (float)fz->grain_len;
-    float env = sinf(norm_pos * M_PI); /* hanning-ish window */
-    wet_l *= env;
-    wet_r *= env;
-
-    fz->read_pos += pitch;
-    if (fz->read_pos >= (float)fz->grain_len) {
-        fz->read_pos -= (float)fz->grain_len;
-
-        /* Apply decay once per grain cycle, not per sample */
-        float decay = 0.95f + c->params[1] * 0.05f;
-        for (int i = 0; i < fz->grain_len; i++) {
-            fz->buf_l[i] *= decay;
-            fz->buf_r[i] *= decay;
-        }
+    float phase = c->ring.phase;
+    /* Apply swing to second half */
+    if (phase > 0.5f) {
+        phase = 0.5f + (phase - 0.5f) * (1.0f - swing) / (1.0f - swing * 0.5f);
     }
 
-    *l = *l * (1.0f - mix) + wet_l * mix;
-    *r = *r * (1.0f - mix) + wet_r * mix;
+    /* Duck curve shape */
+    float duck;
+    if (shape < 0.33f) {
+        /* Half-cosine (smooth) */
+        duck = 0.5f + 0.5f * cosf(phase * 2.0f * M_PI);
+    } else if (shape < 0.66f) {
+        /* Exponential (sharp attack, slow release) */
+        float norm = phase;
+        duck = (norm < 0.1f) ? 1.0f - norm * 10.0f : expf(-norm * 5.0f);
+    } else {
+        /* Hard gate */
+        duck = phase < 0.3f ? 0.0f : 1.0f;
+    }
+
+    float target_gain = 1.0f - depth * (1.0f - duck);
+
+    /* Smooth gain changes with attack/release */
+    float att_coeff = expf(-1.0f / (attack * PFX_SAMPLE_RATE));
+    float rel_coeff = expf(-1.0f / (release_time * PFX_SAMPLE_RATE));
+    float coeff = (target_gain < c->comp.env) ? att_coeff : rel_coeff;
+    c->comp.env = coeff * c->comp.env + (1.0f - coeff) * target_gain;
+
+    float dry_l = *l, dry_r = *r;
+    *l *= c->comp.env;
+    *r *= c->comp.env;
+
+    *l = dry_l * (1.0f - mix) + *l * mix;
+    *r = dry_r * (1.0f - mix) + *r * mix;
 }
 
 /* Process one continuous FX slot for one sample */
 static void process_continuous_fx(continuous_t *c, int type,
-                                   float *l, float *r) {
+                                   float *l, float *r,
+                                   perf_fx_engine_t *e) {
     switch (type) {
         case CONT_DELAY:         process_cont_delay(c, l, r); break;
         case CONT_PING_PONG:     process_cont_ping_pong(c, l, r); break;
@@ -1562,7 +1580,7 @@ static void process_continuous_fx(continuous_t *c, int type,
         case CONT_COMPRESSOR:    process_cont_compressor(c, l, r); break;
         case CONT_SATURATOR:     process_cont_saturator(c, l, r); break;
         case CONT_PITCH_SHIFT:   process_cont_pitch_shift(c, l, r); break;
-        case CONT_FREEZE:        process_cont_freeze(c, l, r); break;
+        case CONT_DUCKER:        process_cont_ducker(c, l, r, e); break;
     }
 }
 
@@ -1676,7 +1694,7 @@ void pfx_engine_render(perf_fx_engine_t *e, int16_t *out_lr, int frames) {
             /* Continuous FX (serial chain of active slots) */
             for (int c = 0; c < e->active_cont_count; c++) {
                 int slot = e->active_cont_slots[c];
-                process_continuous_fx(&e->cont[slot], slot, &l, &r);
+                process_continuous_fx(&e->cont[slot], slot, &l, &r, e);
             }
 
             /* Global LP filter - stereo */
