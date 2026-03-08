@@ -1311,13 +1311,29 @@ static void process_cont_compressor(continuous_t *c, float *l, float *r) {
 static void process_cont_saturator(continuous_t *c, float *l, float *r) {
     float drive = 1.0f + c->params[0] * 20.0f;
     float tone = c->params[1];
+    float curve = c->params[2]; /* 0=soft tanh, 0.5=hard clip, 1=foldback */
     float mix = c->params[3];
 
     float dry_l = *l, dry_r = *r;
 
-    /* Drive */
-    *l = fast_tanh(*l * drive);
-    *r = fast_tanh(*r * drive);
+    /* Apply drive */
+    float dl = *l * drive;
+    float dr = *r * drive;
+
+    /* Shape based on curve parameter */
+    if (curve < 0.33f) {
+        /* Soft saturation (tanh) */
+        *l = fast_tanh(dl);
+        *r = fast_tanh(dr);
+    } else if (curve < 0.66f) {
+        /* Hard clip */
+        *l = soft_clip(dl);
+        *r = soft_clip(dr);
+    } else {
+        /* Foldback distortion */
+        *l = sinf(dl * M_PI * 0.5f);
+        *r = sinf(dr * M_PI * 0.5f);
+    }
 
     /* Tone (LP filter) - stereo */
     float f = cutoff_to_f(0.3f + tone * 0.7f);
