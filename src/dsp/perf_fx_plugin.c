@@ -42,7 +42,7 @@ static const char *PUNCH_NAMES[PFX_NUM_PUNCH_IN] = {
 static const char *CONT_NAMES[PFX_NUM_CONTINUOUS] = {
     "Delay", "Ping-Pong", "Tape Echo", "Auto-Filter",
     "Plate Verb", "Dark Verb", "Spring Verb", "Shimmer",
-    "Chorus", "Phaser", "Flanger", "Lo-Fi",
+    "Chorus", "Phaser", "Flanger", "Trem/Pan",
     "Compressor", "Saturator", "Ring Mod", "Freeze"
 };
 
@@ -59,7 +59,7 @@ static const char *CONT_PARAM_NAMES[PFX_NUM_CONTINUOUS][4] = {
     {"Rate", "Depth", "Feedbk", "Mix"},            /* Chorus */
     {"Rate", "Depth", "Feedbk", "Mix"},            /* Phaser */
     {"Rate", "Depth", "Feedbk", "Mix"},            /* Flanger */
-    {"Noise", "Wow", "Crackle", "Age"},            /* Lo-Fi */
+    {"Rate", "Depth", "Shape", "Mix"},              /* Trem/Pan */
     {"Thresh", "Ratio", "Attack", "Mix"},          /* Compressor */
     {"Drive", "Tone", "Curve", "Mix"},             /* Saturator */
     {"Freq", "Depth", "Tone", "Mix"},              /* Ring Mod */

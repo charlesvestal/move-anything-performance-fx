@@ -70,7 +70,7 @@ enum {
     CONT_CHORUS,
     CONT_PHASER,
     CONT_FLANGER,
-    CONT_LOFI,
+    CONT_TREMOLO_PAN,
     CONT_COMPRESSOR,
     CONT_SATURATOR,
     CONT_RING_MOD,
@@ -180,18 +180,6 @@ typedef struct {
     float env;         /* crossfade envelope */
 } freeze_t;
 
-/* ---- Lo-Fi ---- */
-typedef struct {
-    float noise_level;
-    float wow_phase;
-    float wow_rate;
-    float crackle;
-    unsigned int noise_seed;
-    float hold_l, hold_r;
-    int hold_count;
-    int hold_period;
-} lofi_t;
-
 /* ---- Ring Modulator ---- */
 typedef struct {
     float phase;
@@ -238,7 +226,6 @@ typedef struct {
     mod_delay_t mod_delay;
     compressor_t comp;
     freeze_t freeze;
-    lofi_t lofi;
     ring_mod_t ring;
     svf_t filter_l;    /* for tone controls */
     svf_t filter_r;

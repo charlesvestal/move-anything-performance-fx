@@ -337,8 +337,6 @@ void pfx_engine_init(perf_fx_engine_t *e) {
         for (int j = 0; j < PFX_CONT_PARAMS; j++)
             c->params[j] = 0.5f;
         c->params[3] = 0.3f; /* mix default */
-        c->lofi.noise_seed = 12345 + i * 7;
-        c->lofi.hold_period = 1;
     }
 
     /* Init scene morph */
@@ -547,8 +545,6 @@ void pfx_cont_activate(perf_fx_engine_t *e, int slot) {
     c->comp.env = 0.0f;
     c->freeze.captured = 0;
     c->freeze.read_pos = 0.0f;
-    c->lofi.wow_phase = 0.0f;
-    c->lofi.hold_count = 0;
     c->ring.phase = 0.0f;
     svf_reset(&c->filter_l);
     svf_reset(&c->filter_r);
@@ -1306,50 +1302,53 @@ static void process_cont_flanger(continuous_t *c, float *l, float *r) {
     *r = *r * (1.0f - mix) + dr * mix;
 }
 
-/* Lo-Fi: [0]=noise, [1]=wow, [2]=crackle, [3]=age (SR reduction) */
-static void process_cont_lofi(continuous_t *c, float *l, float *r) {
-    lofi_t *lf = &c->lofi;
-    float noise_amt = c->params[0];
-    float wow_amt = c->params[1];
-    float crackle_amt = c->params[2];
-    float age = c->params[3];
+/* Tremolo/Pan: [0]=rate, [1]=depth, [2]=shape, [3]=mix
+ * [4]=stereo mode (0=mono trem, 0.5=stereo trem, 1=autopan),
+ * [5]=phase, [6]=smooth, [7]=unused */
+static void process_cont_tremolo_pan(continuous_t *c, float *l, float *r) {
+    float rate = 0.1f + c->params[0] * 20.0f;
+    float depth = c->params[1];
+    float shape = c->params[2];
+    float mix = c->params[3];
+    float stereo_mode = c->params[4];
 
-    /* Sample rate reduction (age) */
-    int hold_period = 1 + (int)(age * 15.0f);
-    lf->hold_count++;
-    if (lf->hold_count >= hold_period) {
-        lf->hold_count = 0;
-        lf->hold_l = *l;
-        lf->hold_r = *r;
-    }
-    *l = lf->hold_l;
-    *r = lf->hold_r;
+    mod_delay_t *md = &c->mod_delay;
+    md->lfo_phase += rate / PFX_SAMPLE_RATE;
+    if (md->lfo_phase >= 1.0f) md->lfo_phase -= 1.0f;
 
-    /* Wow (pitch modulation via slow phase shift) */
-    lf->wow_phase += (0.3f + wow_amt * 2.0f) / PFX_SAMPLE_RATE;
-    if (lf->wow_phase >= 1.0f) lf->wow_phase -= 1.0f;
-    float wow = sinf(lf->wow_phase * 2.0f * M_PI) * wow_amt * 0.003f;
-    /* Apply as subtle gain modulation (approximation of pitch wow) */
-    float wow_gain = 1.0f + wow;
-    *l *= wow_gain;
-    *r *= wow_gain;
-
-    /* Noise floor */
-    float noise = white_noise(&lf->noise_seed) * noise_amt * 0.05f;
-    *l += noise;
-    *r += noise;
-
-    /* Crackle */
-    float rnd = white_noise(&lf->noise_seed);
-    if (rnd > (1.0f - crackle_amt * 0.02f)) {
-        float pop = white_noise(&lf->noise_seed) * crackle_amt * 0.3f;
-        *l += pop;
-        *r += pop;
+    /* LFO shape */
+    float lfo;
+    if (shape < 0.33f) {
+        lfo = sinf(md->lfo_phase * 2.0f * M_PI);
+    } else if (shape < 0.66f) {
+        lfo = 4.0f * fabsf(md->lfo_phase - 0.5f) - 1.0f;
+    } else {
+        lfo = md->lfo_phase < 0.5f ? 1.0f : -1.0f;
     }
 
-    /* Soft clip for warmth */
-    *l = fast_tanh(*l);
-    *r = fast_tanh(*r);
+    float dry_l = *l, dry_r = *r;
+    float gain_l, gain_r;
+
+    if (stereo_mode < 0.33f) {
+        /* Mono tremolo — both channels same */
+        float g = 1.0f - depth * (0.5f + 0.5f * lfo);
+        gain_l = gain_r = g;
+    } else if (stereo_mode < 0.66f) {
+        /* Stereo tremolo — slight offset */
+        float lfo_r = sinf((md->lfo_phase + 0.1f) * 2.0f * M_PI);
+        gain_l = 1.0f - depth * (0.5f + 0.5f * lfo);
+        gain_r = 1.0f - depth * (0.5f + 0.5f * lfo_r);
+    } else {
+        /* Autopan — L and R are opposite phase */
+        gain_l = 1.0f - depth * (0.5f + 0.5f * lfo);
+        gain_r = 1.0f - depth * (0.5f - 0.5f * lfo);
+    }
+
+    *l = *l * gain_l;
+    *r = *r * gain_r;
+
+    *l = dry_l * (1.0f - mix) + *l * mix;
+    *r = dry_r * (1.0f - mix) + *r * mix;
 }
 
 /* Compressor: [0]=threshold, [1]=ratio, [2]=attack, [3]=mix */
@@ -1523,7 +1522,7 @@ static void process_continuous_fx(continuous_t *c, int type,
         case CONT_CHORUS:        process_cont_chorus(c, l, r); break;
         case CONT_PHASER:        process_cont_phaser(c, l, r); break;
         case CONT_FLANGER:       process_cont_flanger(c, l, r); break;
-        case CONT_LOFI:          process_cont_lofi(c, l, r); break;
+        case CONT_TREMOLO_PAN:   process_cont_tremolo_pan(c, l, r); break;
         case CONT_COMPRESSOR:    process_cont_compressor(c, l, r); break;
         case CONT_SATURATOR:     process_cont_saturator(c, l, r); break;
         case CONT_RING_MOD:      process_cont_ring_mod(c, l, r); break;
