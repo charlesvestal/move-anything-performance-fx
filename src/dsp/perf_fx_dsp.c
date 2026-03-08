@@ -1124,20 +1124,16 @@ static void process_cont_reverb(continuous_t *c, float *l, float *r,
     /* Adjust reverb character by type */
     switch (reverb_type) {
         case CONT_PLATE_REVERB:
-            /* Bright, smooth */
             damping *= 0.5f;
             break;
         case CONT_DARK_REVERB:
-            /* Heavy damping */
             damping = 0.4f + damping * 0.5f;
             decay *= 1.1f;
             break;
         case CONT_SPRING_REVERB:
-            /* Boomy, drip-like (shorter comb lengths) */
             damping *= 0.3f;
             break;
         case CONT_SHIMMER_REVERB:
-            /* Pitch-shifted feedback (approximated) */
             damping *= 0.3f;
             decay *= 1.15f;
             break;
@@ -1147,16 +1143,31 @@ static void process_cont_reverb(continuous_t *c, float *l, float *r,
     rv->decay = decay;
     rv->damping = damping;
 
-    float wet_l, wet_r;
-    reverb_process_stereo(rv, *l, *r, &wet_l, &wet_r);
-
-    /* Shimmer: add pitch warble with opposite phase for stereo width */
+    /* Shimmer: pitch-shift reverb tail and feed back into input */
+    float in_l = *l, in_r = *r;
     if (reverb_type == CONT_SHIMMER_REVERB && mod > 0.0f) {
-        c->phaser.lfo_phase += (1.0f + mod * 3.0f) / PFX_SAMPLE_RATE;
-        if (c->phaser.lfo_phase >= 1.0f) c->phaser.lfo_phase -= 1.0f;
-        float shimmer = sinf(c->phaser.lfo_phase * 2.0f * M_PI) * mod * 0.3f;
-        wet_l += wet_l * shimmer;
-        wet_r -= wet_r * shimmer; /* opposite phase for width */
+        /* Read pitch-shifted signal from shimmer buffer */
+        float pitch_rate = 1.0f + mod; /* 1.0 = octave up at mod=1 */
+        int pos0 = ((int)rv->shimmer_read_pos) & 4095;
+        int pos1 = (pos0 + 1) & 4095;
+        float frac = rv->shimmer_read_pos - (int)rv->shimmer_read_pos;
+        float pitched = rv->shimmer_buf[pos0] + frac * (rv->shimmer_buf[pos1] - rv->shimmer_buf[pos0]);
+        rv->shimmer_read_pos += pitch_rate;
+        if (rv->shimmer_read_pos >= 4096.0f) rv->shimmer_read_pos -= 4096.0f;
+
+        /* Mix pitch-shifted feedback into reverb input */
+        float shimmer_mix = mod * 0.4f;
+        in_l += pitched * shimmer_mix;
+        in_r += pitched * shimmer_mix;
+    }
+
+    float wet_l, wet_r;
+    reverb_process_stereo(rv, in_l, in_r, &wet_l, &wet_r);
+
+    /* Write reverb output to shimmer buffer for next iteration */
+    if (reverb_type == CONT_SHIMMER_REVERB) {
+        rv->shimmer_buf[rv->shimmer_write_pos] = (wet_l + wet_r) * 0.5f * decay * 0.3f;
+        rv->shimmer_write_pos = (rv->shimmer_write_pos + 1) & 4095;
     }
 
     *l = *l * (1.0f - mix) + wet_l * mix;

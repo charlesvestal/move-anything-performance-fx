@@ -160,6 +160,10 @@ typedef struct {
     float ap_buf[2][PFX_REVERB_AP_MAX];
     int   ap_pos[2];
     int   ap_len[2];
+    /* Shimmer pitch shift state */
+    float shimmer_buf[4096];
+    int shimmer_write_pos;
+    float shimmer_read_pos;
     float damping;
     float decay;
     float mix;
