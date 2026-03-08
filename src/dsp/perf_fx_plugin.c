@@ -40,7 +40,7 @@ static const char *PUNCH_NAMES[PFX_NUM_PUNCH_IN] = {
 
 /* Continuous FX names */
 static const char *CONT_NAMES[PFX_NUM_CONTINUOUS] = {
-    "Delay", "Ping-Pong", "Tape Echo", "Cloud Dly",
+    "Delay", "Ping-Pong", "Tape Echo", "Auto-Filter",
     "Plate Verb", "Dark Verb", "Spring Verb", "Shimmer",
     "Chorus", "Phaser", "Flanger", "Lo-Fi",
     "Compressor", "Saturator", "Ring Mod", "Freeze"
@@ -51,7 +51,7 @@ static const char *CONT_PARAM_NAMES[PFX_NUM_CONTINUOUS][4] = {
     {"Time", "Feedback", "Filter", "Mix"},         /* Delay */
     {"Time", "Feedback", "Spread", "Mix"},         /* Ping-Pong */
     {"Age", "Wow/Flut", "Feedback", "Mix"},        /* Tape Echo */
-    {"Density", "Size", "Pitch", "Mix"},           /* Cloud Delay */
+    {"Rate", "Depth", "Reso", "Mix"},               /* Auto-Filter */
     {"Decay", "Damping", "Pre-Dly", "Mix"},        /* Plate Reverb */
     {"Decay", "Darkness", "Mod", "Mix"},           /* Dark Reverb */
     {"Decay", "Tone", "Drip", "Mix"},              /* Spring Reverb */

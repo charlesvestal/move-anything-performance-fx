@@ -1071,45 +1071,66 @@ static void process_cont_tape_echo(continuous_t *c, float *l, float *r) {
     *r = *r * (1.0f - mix) + dr * mix;
 }
 
-/* Cloud delay: [0]=density, [1]=size, [2]=pitch, [3]=mix */
-static void process_cont_cloud_delay(continuous_t *c, float *l, float *r) {
-    delay_t *d = &c->delay;
-    float density = c->params[0];
-    float size = c->params[1];
-    float pitch = c->params[2];
+/* Auto-filter: [0]=rate, [1]=depth, [2]=resonance, [3]=mix
+ * [4]=shape (0=LP, 0.5=BP, 1=HP), [5]=center freq,
+ * [6]=LFO shape (0=sine, 0.5=triangle, 1=square), [7]=stereo offset */
+static void process_cont_auto_filter(continuous_t *c, float *l, float *r) {
+    float rate = 0.05f + c->params[0] * 10.0f; /* Hz */
+    float depth = c->params[1];
+    float reso = 0.1f + c->params[2] * 0.08f; /* SVF Q: lower = more resonant */
     float mix = c->params[3];
+    float shape = c->params[4]; /* filter type blend */
+    float center = 0.1f + c->params[5] * 0.7f; /* center frequency */
+    float lfo_shape = c->params[6];
+    float stereo_offset = c->params[7] * 0.5f; /* L/R phase offset */
 
-    /* Write to delay buffer */
-    delay_write(d, *l, *r);
+    /* LFO — reuse mod_delay's lfo_phase */
+    mod_delay_t *md = &c->mod_delay;
+    md->lfo_phase += rate / PFX_SAMPLE_RATE;
+    if (md->lfo_phase >= 1.0f) md->lfo_phase -= 1.0f;
 
-    /* Multiple read heads at different positions (granular cloud) */
-    float out_l = 0.0f, out_r = 0.0f;
-    int num_grains = 2 + (int)(density * 6.0f);
-    float grain_size = 500.0f + size * 20000.0f;
-    float pitch_ratio = 0.5f + pitch * 1.5f;
+    /* LFO shape: sine, triangle, square */
+    float lfo_l, lfo_r;
+    float phase_l = md->lfo_phase;
+    float phase_r = md->lfo_phase + stereo_offset;
+    if (phase_r >= 1.0f) phase_r -= 1.0f;
 
-    for (int g = 0; g < num_grains; g++) {
-        float offset = (float)(g + 1) * grain_size / (float)num_grains;
-        offset *= pitch_ratio;
-        if (offset >= (float)(d->length - 1)) offset = (float)(d->length - 2);
-        float gl, gr;
-        delay_read_interp(d, offset, &gl, &gr);
-
-        /* Simple window */
-        float env = 0.5f + 0.5f * sinf((float)g / (float)num_grains * M_PI);
-        out_l += gl * env;
-        out_r += gr * env;
+    if (lfo_shape < 0.33f) {
+        lfo_l = sinf(phase_l * 2.0f * M_PI);
+        lfo_r = sinf(phase_r * 2.0f * M_PI);
+    } else if (lfo_shape < 0.66f) {
+        lfo_l = 4.0f * fabsf(phase_l - 0.5f) - 1.0f;
+        lfo_r = 4.0f * fabsf(phase_r - 0.5f) - 1.0f;
+    } else {
+        lfo_l = phase_l < 0.5f ? 1.0f : -1.0f;
+        lfo_r = phase_r < 0.5f ? 1.0f : -1.0f;
     }
-    out_l /= (float)num_grains;
-    out_r /= (float)num_grains;
 
-    /* Feedback */
-    float fb = density * 0.6f;
-    d->buf_l[d->write_pos > 0 ? d->write_pos - 1 : d->length - 1] += out_l * fb;
-    d->buf_r[d->write_pos > 0 ? d->write_pos - 1 : d->length - 1] += out_r * fb;
+    /* Compute cutoff from center + LFO */
+    float cut_l = center + lfo_l * depth * 0.4f;
+    float cut_r = center + lfo_r * depth * 0.4f;
+    cut_l = clampf(cut_l, 0.01f, 0.95f);
+    cut_r = clampf(cut_r, 0.01f, 0.95f);
 
-    *l = *l * (1.0f - mix) + out_l * mix;
-    *r = *r * (1.0f - mix) + out_r * mix;
+    float f_l = cutoff_to_f(cut_l);
+    float f_r = cutoff_to_f(cut_r);
+
+    float dry_l = *l, dry_r = *r;
+    float lp_l, hp_l, bp_l, lp_r, hp_r, bp_r;
+    svf_process(&c->filter_l, *l, f_l, reso, &lp_l, &hp_l, &bp_l);
+    svf_process(&c->filter_r, *r, f_r, reso, &lp_r, &hp_r, &bp_r);
+
+    /* Blend filter types based on shape param */
+    if (shape < 0.33f) {
+        *l = lp_l; *r = lp_r;
+    } else if (shape < 0.66f) {
+        *l = bp_l; *r = bp_r;
+    } else {
+        *l = hp_l; *r = hp_r;
+    }
+
+    *l = dry_l * (1.0f - mix) + *l * mix;
+    *r = dry_r * (1.0f - mix) + *r * mix;
 }
 
 /* Reverb processing: [0]=decay, [1]=damping/darkness, [2]=pre-delay/mod, [3]=mix */
@@ -1492,7 +1513,7 @@ static void process_continuous_fx(continuous_t *c, int type,
         case CONT_DELAY:         process_cont_delay(c, l, r); break;
         case CONT_PING_PONG:     process_cont_ping_pong(c, l, r); break;
         case CONT_TAPE_ECHO:     process_cont_tape_echo(c, l, r); break;
-        case CONT_CLOUD_DELAY:   process_cont_cloud_delay(c, l, r); break;
+        case CONT_AUTO_FILTER:   process_cont_auto_filter(c, l, r); break;
         case CONT_PLATE_REVERB:
         case CONT_DARK_REVERB:
         case CONT_SPRING_REVERB:
