@@ -204,45 +204,13 @@ static void reverb_init(reverb_t *rv) {
     rv->mix = 0.3f;
 }
 
-static float reverb_process_mono(reverb_t *rv, float input) {
-    float out = 0.0f;
-    float decay = rv->decay;
-    float damp = rv->damping;
-
-    /* 4 parallel comb filters */
-    for (int i = 0; i < 4; i++) {
-        float *buf = rv->comb_buf[i];
-        int pos = rv->comb_pos[i];
-        float delayed = buf[pos];
-
-        /* LP filter in feedback */
-        rv->comb_filt[i] = delayed * (1.0f - damp) + rv->comb_filt[i] * damp;
-        buf[pos] = input + rv->comb_filt[i] * decay;
-
-        rv->comb_pos[i] = (pos + 1) % rv->comb_len[i];
-        out += delayed;
-    }
-    out *= 0.25f;
-
-    /* 2 series allpass filters */
-    for (int i = 0; i < 2; i++) {
-        float *buf = rv->ap_buf[i];
-        int pos = rv->ap_pos[i];
-        float delayed = buf[pos];
-        float y = -out * 0.5f + delayed;
-        buf[pos] = out + delayed * 0.5f;
-        rv->ap_pos[i] = (pos + 1) % rv->ap_len[i];
-        out = y;
-    }
-
-    return out;
-}
 
 static void reverb_process_stereo(reverb_t *rv, float in_l, float in_r,
                                    float *out_l, float *out_r) {
     float left = 0.0f, right = 0.0f;
     float decay = rv->decay;
     float damp = rv->damping;
+    float mono_in = (in_l + in_r) * 0.5f;
 
     for (int i = 0; i < 4; i++) {
         float *buf = rv->comb_buf[i];
@@ -251,7 +219,7 @@ static void reverb_process_stereo(reverb_t *rv, float in_l, float in_r,
         int pos_l = rv->comb_pos[i];
         float del_l = buf[pos_l];
         rv->comb_filt[i] = del_l * (1.0f - damp) + rv->comb_filt[i] * damp;
-        buf[pos_l] = in_l + rv->comb_filt[i] * decay;
+        buf[pos_l] = mono_in + rv->comb_filt[i] * decay;
         rv->comb_pos[i] = (pos_l + 1) % rv->comb_len[i];
         left += del_l;
 
