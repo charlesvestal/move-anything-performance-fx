@@ -1,0 +1,20 @@
+{
+    "id": "performance-fx",
+    "name": "Performance FX",
+    "abbrev": "PFX",
+    "version": "0.1.0",
+    "description": "Live performance audio effects processor with pressure-sensitive punch-in FX, continuous FX, scenes, and presets",
+    "author": "chaolue",
+    "ui": "ui.js",
+    "dsp": "dsp.so",
+    "api_version": 2,
+    "component_type": "tool",
+    "capabilities": {
+        "audio_out": true,
+        "audio_in": true,
+        "midi_in": true,
+        "midi_out": false,
+        "aftertouch": true,
+        "claims_master_knob": true
+    }
+}

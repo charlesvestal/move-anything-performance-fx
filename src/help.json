@@ -1,0 +1,191 @@
+{
+  "title": "Performance FX",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Live audio FX processor",
+        "with pressure-sensitive",
+        "punch-in and continuous",
+        "effects, scenes, and",
+        "step presets.",
+        "",
+        "Access via Tools menu",
+        "(Shift+Vol+Step13).",
+        "",
+        "Audio sources:",
+        "- Line In (mic/input)",
+        "- Move Mix (main out)",
+        "- Tracks (per-track",
+        "  via Link Audio)"
+      ]
+    },
+    {
+      "title": "Pad Grid",
+      "lines": [
+        "TOP 2 ROWS: Punch-in FX",
+        "Hold pad = FX active",
+        "Release = FX stops",
+        "Pressure controls depth",
+        "",
+        "Row 4: RPT1/4 RPT1/8",
+        "  RPT1/16 RPTRP STUTR",
+        "  SCATR REVRSE HALFSP",
+        "Row 3: LPFLT HPFLT",
+        "  BPFLT RESOPK CRUSH",
+        "  SRRED TAPEST DUCKR",
+        "",
+        "BOTTOM 2 ROWS:",
+        "FX Mode: Continuous FX",
+        "  Tap = toggle on/off",
+        "  Tap selected = deselect",
+        "  Shift+tap = deactivate",
+        "Scene Mode: Scene recall",
+        "  (toggle with Loop btn)"
+      ]
+    },
+    {
+      "title": "Continuous FX",
+      "lines": [
+        "Row 2: DELAY PING TAPE",
+        "  CLOUD PLATE DARK",
+        "  SPRING SHIMMER",
+        "Row 1: CHORUS PHASER",
+        "  FLANGE LOFI COMP",
+        "  SATUR RING FREEZE",
+        "",
+        "Max 3 active at once.",
+        "",
+        "Selected FX (white pad)",
+        "maps all 8 knobs to",
+        "that FX's parameters.",
+        "Jog wheel scrolls",
+        "between active FX.",
+        "Master knob = FX mix."
+      ]
+    },
+    {
+      "title": "Encoders",
+      "lines": [
+        "No FX selected (global):",
+        "E1: Dry/Wet",
+        "E2: Input Gain",
+        "E3: LP Filter",
+        "E4: HP Filter",
+        "E5: EQ Low",
+        "E6: EQ Mid",
+        "E7: EQ High",
+        "E8: Output Gain",
+        "",
+        "FX selected:",
+        "E1-E4: Primary params",
+        "E5-E8: Secondary params",
+        "Master: FX Mix level"
+      ]
+    },
+    {
+      "title": "Buttons",
+      "lines": [
+        "Undo: Bypass FX",
+        "  Tap = toggle bypass",
+        "  Hold = momentary bypass",
+        "",
+        "Loop: Toggle scene mode",
+        "Shift+Loop: Step FX seq",
+        "",
+        "Copy: Ducker rate cycle",
+        "  (scene mode: save)",
+        "Delete: Clear scene",
+        "  Shift+Del: Clear step",
+        "",
+        "Rec: Step record mode",
+        "Play: Start/stop transport",
+        "Capture: Record output",
+        "Back: Save & exit"
+      ]
+    },
+    {
+      "title": "Source Selection",
+      "lines": [
+        "Shift+Jog click: cycle",
+        "  Line In > Move Mix >",
+        "  Tracks",
+        "",
+        "Track buttons (1-4):",
+        "  Toggle track on/off",
+        "  Auto-enters Tracks mode",
+        "  Shift+Track: solo",
+        "",
+        "Tracks mode uses Link",
+        "Audio per-track streams.",
+        "Requires Link Audio",
+        "enabled in features.json."
+      ]
+    },
+    {
+      "title": "Tempo",
+      "lines": [
+        "Jog click: Tap tempo",
+        "  (2+ taps to calculate)",
+        "Shift+Jog turn: Fine BPM",
+        "",
+        "Tempo affects:",
+        "- Beat repeat divisions",
+        "- Ducker timing",
+        "- Step FX sequencer"
+      ]
+    },
+    {
+      "title": "Scenes",
+      "lines": [
+        "16 scene snapshots store",
+        "all continuous FX states",
+        "and global parameters.",
+        "",
+        "Loop btn: enter scene mode",
+        "Tap pad: recall scene",
+        "Copy+pad: save scene",
+        "Delete+pad: clear scene",
+        "",
+        "Scene morph:",
+        "Shift+pad A, Shift+pad B",
+        "Crossfades A to B (~2s)"
+      ]
+    },
+    {
+      "title": "Step Presets",
+      "lines": [
+        "16 step buttons store",
+        "FX state snapshots.",
+        "",
+        "Tap step: recall preset",
+        "Shift+step: save preset",
+        "Shift+Delete: clear step",
+        "",
+        "Step FX Sequencer:",
+        "Shift+Loop to toggle.",
+        "Plays steps in sequence",
+        "synced to tempo.",
+        "Shift+Jog: change div",
+        "  (1/4, 1/8, 1/16, 1bar)",
+        "Play btn starts transport."
+      ]
+    },
+    {
+      "title": "Persistence",
+      "lines": [
+        "State auto-saves every",
+        "~10 seconds and on exit.",
+        "",
+        "Per-set: if a set is",
+        "active, state is saved",
+        "under that set's UUID.",
+        "",
+        "Saves: FX states, knob",
+        "values, scenes, step",
+        "presets, source config,",
+        "tempo, and track routing."
+      ]
+    }
+  ]
+}
