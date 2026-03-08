@@ -155,6 +155,8 @@ typedef struct {
     int   comb_pos[4];
     int   comb_len[4];
     float comb_filt[4];
+    int   comb_pos_r[4];     /* separate read positions for right channel */
+    float comb_filt_r[4];
     float ap_buf[2][PFX_REVERB_AP_MAX];
     int   ap_pos[2];
     int   ap_len[2];

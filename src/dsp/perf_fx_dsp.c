@@ -192,6 +192,8 @@ static void reverb_init(reverb_t *rv) {
         rv->comb_len[i] = COMB_LENGTHS[i];
         rv->comb_pos[i] = 0;
         rv->comb_filt[i] = 0.0f;
+        rv->comb_pos_r[i] = rv->comb_len[i] / 3; /* offset by 1/3 for stereo */
+        rv->comb_filt_r[i] = 0.0f;
     }
     for (int i = 0; i < 2; i++) {
         rv->ap_len[i] = AP_LENGTHS[i];
@@ -234,6 +236,54 @@ static float reverb_process_mono(reverb_t *rv, float input) {
     }
 
     return out;
+}
+
+static void reverb_process_stereo(reverb_t *rv, float in_l, float in_r,
+                                   float *out_l, float *out_r) {
+    float left = 0.0f, right = 0.0f;
+    float decay = rv->decay;
+    float damp = rv->damping;
+
+    for (int i = 0; i < 4; i++) {
+        float *buf = rv->comb_buf[i];
+
+        /* Left channel */
+        int pos_l = rv->comb_pos[i];
+        float del_l = buf[pos_l];
+        rv->comb_filt[i] = del_l * (1.0f - damp) + rv->comb_filt[i] * damp;
+        buf[pos_l] = in_l + rv->comb_filt[i] * decay;
+        rv->comb_pos[i] = (pos_l + 1) % rv->comb_len[i];
+        left += del_l;
+
+        /* Right channel reads from offset position in same buffer */
+        int pos_r = rv->comb_pos_r[i];
+        float del_r = buf[pos_r];
+        rv->comb_filt_r[i] = del_r * (1.0f - damp) + rv->comb_filt_r[i] * damp;
+        /* Right reads only, doesn't write — shares buffer with left */
+        rv->comb_pos_r[i] = (pos_r + 1) % rv->comb_len[i];
+        right += del_r;
+    }
+    left *= 0.25f;
+    right *= 0.25f;
+
+    /* Allpass filters — separate for L and R */
+    for (int i = 0; i < 2; i++) {
+        float *buf = rv->ap_buf[i];
+        int pos = rv->ap_pos[i];
+        float delayed = buf[pos];
+
+        float yl = -left * 0.5f + delayed;
+        buf[pos] = left + delayed * 0.5f;
+        left = yl;
+
+        float yr = -right * 0.5f + delayed;
+        right = yr;
+
+        rv->ap_pos[i] = (pos + 1) % rv->ap_len[i];
+    }
+
+    *out_l = left;
+    *out_r = right;
 }
 
 /* ============================================================
@@ -1097,19 +1147,20 @@ static void process_cont_reverb(continuous_t *c, float *l, float *r,
     rv->decay = decay;
     rv->damping = damping;
 
-    float mono = (*l + *r) * 0.5f;
-    float wet = reverb_process_mono(rv, mono);
+    float wet_l, wet_r;
+    reverb_process_stereo(rv, *l, *r, &wet_l, &wet_r);
 
-    /* Shimmer: add slight pitch warble via phase modulation */
+    /* Shimmer: add pitch warble with opposite phase for stereo width */
     if (reverb_type == CONT_SHIMMER_REVERB && mod > 0.0f) {
         c->phaser.lfo_phase += (1.0f + mod * 3.0f) / PFX_SAMPLE_RATE;
         if (c->phaser.lfo_phase >= 1.0f) c->phaser.lfo_phase -= 1.0f;
-        float shimmer = wet * sinf(c->phaser.lfo_phase * 2.0f * M_PI) * mod * 0.3f;
-        wet += shimmer;
+        float shimmer = sinf(c->phaser.lfo_phase * 2.0f * M_PI) * mod * 0.3f;
+        wet_l += wet_l * shimmer;
+        wet_r -= wet_r * shimmer; /* opposite phase for width */
     }
 
-    *l = *l * (1.0f - mix) + wet * mix;
-    *r = *r * (1.0f - mix) + wet * mix;
+    *l = *l * (1.0f - mix) + wet_l * mix;
+    *r = *r * (1.0f - mix) + wet_r * mix;
 }
 
 /* Chorus: [0]=rate, [1]=depth, [2]=feedback, [3]=mix */
