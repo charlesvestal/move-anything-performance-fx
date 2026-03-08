@@ -507,9 +507,20 @@ void pfx_punch_set_pressure(perf_fx_engine_t *e, int slot, float pressure) {
 
 static void update_active_cont_list(perf_fx_engine_t *e) {
     e->active_cont_count = 0;
-    for (int i = 0; i < PFX_NUM_CONTINUOUS && e->active_cont_count < PFX_MAX_CONTINUOUS; i++) {
-        if (e->cont[i].active) {
+    for (int i = 0; i < PFX_NUM_CONTINUOUS; i++) {
+        if (e->cont[i].active && e->active_cont_count < PFX_MAX_CONTINUOUS) {
             e->active_cont_slots[e->active_cont_count++] = i;
+        }
+    }
+    /* Sort by activation order (bubble sort, max 3 elements) */
+    for (int i = 0; i < e->active_cont_count - 1; i++) {
+        for (int j = i + 1; j < e->active_cont_count; j++) {
+            if (e->cont_activation_order[e->active_cont_slots[i]] >
+                e->cont_activation_order[e->active_cont_slots[j]]) {
+                int tmp = e->active_cont_slots[i];
+                e->active_cont_slots[i] = e->active_cont_slots[j];
+                e->active_cont_slots[j] = tmp;
+            }
         }
     }
 }
@@ -532,6 +543,7 @@ void pfx_cont_activate(perf_fx_engine_t *e, int slot) {
     }
 
     e->cont[slot].active = 1;
+    e->cont_activation_order[slot] = ++e->cont_activation_counter;
 
     /* Reset effect state */
     continuous_t *c = &e->cont[slot];
@@ -553,6 +565,7 @@ void pfx_cont_activate(perf_fx_engine_t *e, int slot) {
 void pfx_cont_deactivate(perf_fx_engine_t *e, int slot) {
     if (slot < 0 || slot >= PFX_NUM_CONTINUOUS) return;
     e->cont[slot].active = 0;
+    e->cont_activation_order[slot] = 0;
     update_active_cont_list(e);
 }
 

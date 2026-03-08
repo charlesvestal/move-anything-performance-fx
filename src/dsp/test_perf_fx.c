@@ -520,6 +520,27 @@ static void test_punch_crossfade(void) {
     PASS();
 }
 
+static void test_cont_activation_order(void) {
+    TEST("Continuous FX activation order");
+    perf_fx_engine_t e;
+    memset(&e, 0, sizeof(e));
+    pfx_engine_init(&e);
+
+    /* Activate in order: slot 5, slot 2, slot 10 */
+    pfx_cont_activate(&e, 5);
+    pfx_cont_activate(&e, 2);
+    pfx_cont_activate(&e, 10);
+    ASSERT_EQ_INT(e.active_cont_count, 3, "3 active");
+
+    /* Should be ordered by activation: 5, 2, 10 (not index order 2, 5, 10) */
+    ASSERT_EQ_INT(e.active_cont_slots[0], 5, "first activated = slot 5");
+    ASSERT_EQ_INT(e.active_cont_slots[1], 2, "second activated = slot 2");
+    ASSERT_EQ_INT(e.active_cont_slots[2], 10, "third activated = slot 10");
+
+    pfx_engine_destroy(&e);
+    PASS();
+}
+
 /* ============================================================
  * Main
  * ============================================================ */
@@ -547,6 +568,7 @@ int main(void) {
     test_cont_toggle();
     test_cont_max_simultaneous();
     test_cont_set_param();
+    test_cont_activation_order();
 
     printf("\nScenes:\n");
     test_scene_save_recall();

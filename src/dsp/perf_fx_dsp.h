@@ -289,6 +289,8 @@ typedef struct {
     continuous_t cont[PFX_NUM_CONTINUOUS];
     int active_cont_slots[PFX_MAX_CONTINUOUS]; /* indices of active continuous FX */
     int active_cont_count;
+    int cont_activation_order[PFX_NUM_CONTINUOUS]; /* activation sequence number per slot */
+    int cont_activation_counter;                    /* monotonic counter */
 
     /* Scenes and presets */
     scene_t scenes[PFX_NUM_SCENES];
