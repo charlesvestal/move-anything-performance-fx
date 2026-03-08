@@ -73,7 +73,7 @@ Tap a pad to toggle the effect on/off. **Maximum 3 continuous FX can be active a
 | 1 | DELAY | Standard delay |
 | 2 | PING | Ping-pong delay |
 | 3 | TAPE | Tape delay with wow/flutter |
-| 4 | CLOUD | Granular cloud delay |
+| 4 | AUTFLT | Auto-filter (LFO-swept filter) |
 | 5 | PLATE | Plate reverb |
 | 6 | DARK | Dark reverb |
 | 7 | SPRING | Spring reverb |
@@ -86,11 +86,11 @@ Tap a pad to toggle the effect on/off. **Maximum 3 continuous FX can be active a
 | 1 | CHORUS | Chorus |
 | 2 | PHASER | Phaser |
 | 3 | FLANGE | Flanger |
-| 4 | LOFI | Lo-fi degradation |
+| 4 | TRMPAN | Tremolo and autopan |
 | 5 | COMP | Compressor |
 | 6 | SATUR | Saturation/drive |
-| 7 | RING | Ring modulator |
-| 8 | FREEZE | Spectral freeze |
+| 7 | PITCH | Granular pitch shift |
+| 8 | DUCKR | Auto-ducker (sidechain) |
 
 ### Selecting and Editing FX
 

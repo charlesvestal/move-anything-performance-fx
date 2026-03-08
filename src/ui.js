@@ -86,8 +86,8 @@ const PUNCH_DIM_COLORS = [
 const CONT_COLORS = [
     SkyBlue, SkyBlue, SkyBlue, PaleCyan,           /* Delays: sky blue */
     AzureBlue, RoyalBlue, AzureBlue, Lilac,        /* Reverbs: blue */
-    MintGreen, BrightGreen, NeonGreen, Ochre,      /* Mod FX: green, Lo-Fi: ochre */
-    VividYellow, OrangeRed, HotMagenta, Cyan        /* Comp/Sat/Ring/Freeze */
+    MintGreen, BrightGreen, NeonGreen, Ochre,      /* Mod FX: green, Trem/Pan: ochre */
+    VividYellow, OrangeRed, HotMagenta, Cyan        /* Comp/Sat/Pitch/Ducker */
 ];
 
 const CONT_DIM_COLORS = [
@@ -107,10 +107,10 @@ const PUNCH_NAMES = [
 
 /* Continuous FX names (short) */
 const CONT_NAMES = [
-    'DELAY', 'PING', 'TAPE', 'CLOUD',
+    'DELAY', 'PING', 'TAPE', 'AUTFLT',
     'PLATE', 'DARK', 'SPRING', 'SHIMMER',
-    'CHORUS', 'PHASER', 'FLANGE', 'LO-FI',
-    'COMP', 'SATUR', 'RING', 'FREEZE'
+    'CHORUS', 'PHASER', 'FLANGE', 'TRMPAN',
+    'COMP', 'SATUR', 'PITCH', 'DUCKR'
 ];
 
 /* Default encoder labels */
@@ -124,7 +124,7 @@ const CONT_PARAM_LABELS = [
     ['Time', 'Feedbk', 'Filter', 'Mix'],
     ['Time', 'Feedbk', 'Spread', 'Mix'],
     ['Age', 'Wow', 'Feedbk', 'Mix'],
-    ['Densty', 'Size', 'Pitch', 'Mix'],
+    ['Rate', 'Depth', 'Reso', 'Mix'],
     ['Decay', 'Damp', 'PreDly', 'Mix'],
     ['Decay', 'Dark', 'Mod', 'Mix'],
     ['Decay', 'Tone', 'Drip', 'Mix'],
@@ -132,11 +132,11 @@ const CONT_PARAM_LABELS = [
     ['Rate', 'Depth', 'Feedbk', 'Mix'],
     ['Rate', 'Depth', 'Feedbk', 'Mix'],
     ['Rate', 'Depth', 'Feedbk', 'Mix'],
-    ['Noise', 'Wow', 'Crackl', 'Age'],
+    ['Rate', 'Depth', 'Shape', 'Mix'],
     ['Thrsh', 'Ratio', 'Attck', 'Mix'],
     ['Drive', 'Tone', 'Curve', 'Mix'],
-    ['Freq', 'Depth', 'Tone', 'Mix'],
-    ['Pos', 'Decay', 'Pitch', 'Mix']
+    ['Pitch', 'Grain', 'Qual', 'Mix'],
+    ['Rate', 'Depth', 'Shape', 'Mix']
 ];
 
 /* Persistence paths */
