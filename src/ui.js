@@ -1,14 +1,10 @@
 /*
- * Performance FX Module UI
+ * Performance FX Module UI — v2 Architecture
  *
- * Live performance audio effects processor with:
- * - 16 pressure-sensitive punch-in FX (top 2 pad rows)
- * - 16 toggleable continuous FX (bottom 2 pad rows)
- * - 8 context-sensitive encoders
- * - 16 step presets
- * - 16 scene snapshots with morphing
- * - Step FX sequencer
- * - Per-set state persistence
+ * 32 unified punch-in FX pads (hold=on, release=off)
+ * Shift+hold = latch, Shift+hold latched = unlatch
+ * Last-touched pad gets E1-E4, E5-E8 always global
+ * Step sequencer, scene presets, per-set persistence
  */
 
 import {
@@ -47,101 +43,123 @@ import { announce } from '/data/UserData/move-anything/shared/screen_reader.mjs'
 const SCREEN_W = 128;
 const SCREEN_H = 64;
 const LEDS_PER_FRAME = 8;
+const NUM_SLOTS = 32;
 
-/* Pad layout: top-to-bottom, left-to-right
- * Row 4 (top):    92 93 94 95 96 97 98 99  -> Punch-in 0-7
- * Row 3:          84 85 86 87 88 89 90 91  -> Punch-in 8-15
- * Row 2:          76 77 78 79 80 81 82 83  -> Continuous 0-7
- * Row 1 (bottom): 68 69 70 71 72 73 74 75  -> Continuous 8-15
+/* Pad note → slot index mapping
+ * Row 4 (top):    92-99  → slots 0-7
+ * Row 3:          84-91  → slots 8-15
+ * Row 2:          76-83  → slots 16-23
+ * Row 1 (bottom): 68-75  → slots 24-31
  */
-const PUNCH_PADS = [92, 93, 94, 95, 96, 97, 98, 99,
-                    84, 85, 86, 87, 88, 89, 90, 91];
-const CONT_PADS  = [76, 77, 78, 79, 80, 81, 82, 83,
-                    68, 69, 70, 71, 72, 73, 74, 75];
+const PAD_NOTES = [
+    92, 93, 94, 95, 96, 97, 98, 99,   /* Row 4: slots 0-7 */
+    84, 85, 86, 87, 88, 89, 90, 91,   /* Row 3: slots 8-15 */
+    76, 77, 78, 79, 80, 81, 82, 83,   /* Row 2: slots 16-23 */
+    68, 69, 70, 71, 72, 73, 74, 75    /* Row 1: slots 24-31 */
+];
 
-/* Track buttons (CCs) */
+/* Build reverse lookup: note → slot index */
+const NOTE_TO_SLOT = {};
+for (let i = 0; i < NUM_SLOTS; i++) {
+    NOTE_TO_SLOT[PAD_NOTES[i]] = i;
+}
+
+/* Track buttons */
 const TRACK_CCS = [MoveRow1, MoveRow2, MoveRow3, MoveRow4];
 
-/* Punch-in FX colors (by category) */
-const PUNCH_COLORS = [
-    OrangeRed, OrangeRed, OrangeRed, OrangeRed,  /* Beat repeats: orange */
-    BrightRed, BrightRed,                          /* Stutter/Scatter: red */
-    Purple, ElectricViolet,                        /* Reverse/HalfSpeed: purple */
-    AzureBlue, AzureBlue, AzureBlue, Cyan,        /* Filters: blue */
-    BrightPink, HotMagenta,                        /* Crush: pink */
-    Violet, BrightGreen                            /* Tape/Ducker: violet/green */
-];
-
-/* Punch-in FX dim colors (inactive) */
-const PUNCH_DIM_COLORS = [
-    BurntOrange, BurntOrange, BurntOrange, BurntOrange,
-    67, 67,      /* Brick */
-    107, 108,    /* DarkPurple, DarkViolet */
-    Navy, Navy, Navy, 87,
-    113, 109,    /* Mauve, DeepMagenta */
-    108, ForestGreen
-];
-
-/* Continuous FX colors (by category) */
-const CONT_COLORS = [
-    SkyBlue, SkyBlue, SkyBlue, PaleCyan,           /* Delays: sky blue */
-    AzureBlue, RoyalBlue, AzureBlue, Lilac,        /* Reverbs: blue */
-    MintGreen, BrightGreen, NeonGreen, Ochre,      /* Mod FX: green, Trem/Pan: ochre */
-    VividYellow, OrangeRed, HotMagenta, Cyan        /* Comp/Sat/Pitch/Ducker */
-];
-
-const CONT_DIM_COLORS = [
-    95, 95, 95, 90,
-    93, 95, 93, 101,
-    80, ForestGreen, 85, 75,
-    73, 67, 109, 87
-];
-
-/* Punch-in names (short) */
-const PUNCH_NAMES = [
+/* FX Names (32) */
+const FX_NAMES = [
+    /* Row 4: Time/Repeat */
     'RPT 1/4', 'RPT 1/8', 'RPT 1/16', 'RPT TRP',
     'STUTTER', 'SCATTER', 'REVERSE', 'HALF-SPD',
-    'LP FILT', 'HP FILT', 'BP FILT', 'RESO PK',
-    'CRUSH', 'SR RED', 'TAPE STP', 'DUCKER'
+    /* Row 3: Filter Sweeps */
+    'LP SWP\u2193', 'HP SWP\u2191', 'BP RISE', 'BP FALL',
+    'RESO SW', 'PHASER', 'FLANGER', 'AUTOFLT',
+    /* Row 2: Space Throws */
+    'DELAY', 'PING', 'TAPE ECH', 'ECH FRZ',
+    'REVERB', 'SHIMMER', 'DK VERB', 'SPRING',
+    /* Row 1: Distortion/Rhythm */
+    'CRUSH', 'DWNSMPL', 'TAPE STP', 'VNL BRK',
+    'SATURATE', 'GATE', 'TREMOLO', 'CHORUS'
 ];
 
-/* Continuous FX names (short) */
-const CONT_NAMES = [
-    'DELAY', 'PING', 'TAPE', 'AUTFLT',
-    'PLATE', 'DARK', 'SPRING', 'SHIMMER',
-    'CHORUS', 'PHASER', 'FLANGE', 'TRMPAN',
-    'COMP', 'SATUR', 'PITCH', 'DUCKR'
+/* Per-FX E1-E4 param labels */
+const FX_PARAM_LABELS = [
+    /* Row 4: repeats/time */
+    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT 1/4 */
+    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT 1/8 */
+    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT 1/16 */
+    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT TRP */
+    ['Grain', 'Div', 'Decay', 'Filter'],           /* STUTTER */
+    ['Grain', 'Div', 'Decay', 'Filter'],           /* SCATTER */
+    ['Length', 'Fade', 'Filter', '\u2014'],         /* REVERSE */
+    ['Speed', 'Fade', 'Filter', '\u2014'],         /* HALF-SPD */
+    /* Row 3: filter sweeps */
+    ['Speed', 'Range', 'Reso', 'Start'],           /* LP SWP */
+    ['Speed', 'Range', 'Reso', 'Start'],           /* HP SWP */
+    ['Speed', 'Range', 'Reso', 'Start'],           /* BP RISE */
+    ['Speed', 'Range', 'Reso', 'Start'],           /* BP FALL */
+    ['Speed', 'Range', 'Reso', 'Start'],           /* RESO SW */
+    ['Speed', 'Depth', 'Feedbk', 'Stages'],       /* PHASER */
+    ['Speed', 'Depth', 'Feedbk', 'Manual'],        /* FLANGER */
+    ['Speed', 'Depth', 'Reso', 'Shape'],           /* AUTOFLT */
+    /* Row 2: space throws */
+    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* DELAY */
+    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* PING */
+    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* TAPE ECH */
+    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* ECH FRZ */
+    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* REVERB */
+    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* SHIMMER */
+    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* DK VERB */
+    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* SPRING */
+    /* Row 1: distortion/rhythm */
+    ['Bits', '\u2014', '\u2014', '\u2014'],         /* CRUSH */
+    ['Rate', '\u2014', '\u2014', '\u2014'],         /* DWNSMPL */
+    ['Speed', 'Wow', '\u2014', '\u2014'],           /* TAPE STP */
+    ['Speed', 'Noise', '\u2014', '\u2014'],         /* VNL BRK */
+    ['Drive', 'Tone', 'Curve', '\u2014'],           /* SATURATE */
+    ['Thresh', 'Attack', 'Release', '\u2014'],      /* GATE */
+    ['Speed', 'Depth', 'Shape', '\u2014'],          /* TREMOLO */
+    ['Rate', 'Depth', 'Feedbk', '\u2014']           /* CHORUS */
 ];
 
-/* Default encoder labels */
-const DEFAULT_KNOB_LABELS = ['Dry/Wet', 'In Gain', 'LP Filt', 'HP Filt',
-                              'EQ Low', 'EQ Mid', 'EQ High', 'Out Gain'];
-const DEFAULT_KNOB_PARAMS = ['dry_wet', 'input_gain', 'global_lp', 'global_hp',
-                              'eq_low', 'eq_mid', 'eq_high', 'output_gain'];
+/* Global param labels (E5-E8) */
+const GLOBAL_LABELS = ['HPF', 'LPF', 'D/W', 'Bump'];
+const GLOBAL_PARAMS = ['global_hpf', 'global_lpf', 'dry_wet', 'eq_bump'];
+const GLOBAL_DEFAULTS = [0.0, 1.0, 1.0, 0.5];
 
-/* Continuous FX param labels per type (first 4) */
-const CONT_PARAM_LABELS = [
-    ['Time', 'Feedbk', 'Filter', 'Mix'],
-    ['Time', 'Feedbk', 'Spread', 'Mix'],
-    ['Age', 'Wow', 'Feedbk', 'Mix'],
-    ['Rate', 'Depth', 'Reso', 'Mix'],
-    ['Decay', 'Damp', 'PreDly', 'Mix'],
-    ['Decay', 'Dark', 'Mod', 'Mix'],
-    ['Decay', 'Tone', 'Drip', 'Mix'],
-    ['Decay', 'Pitch', 'Mod', 'Mix'],
-    ['Rate', 'Depth', 'Feedbk', 'Mix'],
-    ['Rate', 'Depth', 'Feedbk', 'Mix'],
-    ['Rate', 'Depth', 'Feedbk', 'Mix'],
-    ['Rate', 'Depth', 'Shape', 'Mix'],
-    ['Thrsh', 'Ratio', 'Attck', 'Mix'],
-    ['Drive', 'Tone', 'Curve', 'Mix'],
-    ['Pitch', 'Grain', 'Qual', 'Mix'],
-    ['Rate', 'Depth', 'Shape', 'Mix']
-];
+/* LED color mapping per slot */
+const BRIGHT_COLORS = [];
+const DIM_COLORS = [];
+
+/* Row 4 (slots 0-7): Orange */
+for (let i = 0; i < 8; i++) {
+    BRIGHT_COLORS.push(OrangeRed);
+    DIM_COLORS.push(Ochre);
+}
+/* Row 3 (slots 8-15): Blue */
+for (let i = 0; i < 8; i++) {
+    BRIGHT_COLORS.push(AzureBlue);
+    DIM_COLORS.push(RoyalBlue);
+}
+/* Row 2 (slots 16-23): Purple */
+for (let i = 0; i < 8; i++) {
+    BRIGHT_COLORS.push(ElectricViolet);
+    DIM_COLORS.push(Violet);
+}
+/* Row 1 (slots 24-31): Pink for 24-28, Green for 29-31 */
+for (let i = 24; i < 32; i++) {
+    if (i <= 28) {
+        BRIGHT_COLORS.push(BrightPink);
+        DIM_COLORS.push(Rose);
+    } else {
+        BRIGHT_COLORS.push(BrightGreen);
+        DIM_COLORS.push(ForestGreen);
+    }
+}
 
 /* Persistence paths */
 const STATE_DIR = '/data/UserData/move-anything/perf_fx_state';
-const DEFAULTS_PATH = '/data/UserData/move-anything/perf_fx_defaults.json';
 
 /* ================================================================
  * State
@@ -149,41 +167,34 @@ const DEFAULTS_PATH = '/data/UserData/move-anything/perf_fx_defaults.json';
 
 let shiftHeld = false;
 let bypassed = false;
-let undoHeld = false; /* for momentary bypass */
-let undoWasBypassed = false; /* bypass state before hold */
+let undoHeld = false;
+let undoWasBypassed = false;
 
-/* Punch-in state */
-let punchActive = new Array(16).fill(false);
-let punchPressure = new Array(16).fill(0);
+/* FX state */
+let fxActive = new Array(NUM_SLOTS).fill(false);
+let fxLatched = new Array(NUM_SLOTS).fill(false);
+let lastTouched = -1;  /* slot index with E1-E4 focus */
 
-/* Continuous FX state */
-let contActive = new Array(16).fill(false);
-let selectedCont = -1;  /* Currently selected continuous FX for encoder mapping */
+/* Per-slot E1-E4 param values (0.0-1.0) */
+let slotParams = [];
+for (let i = 0; i < NUM_SLOTS; i++) {
+    slotParams.push([0.5, 0.5, 0.5, 0.5]);
+}
 
-/* Encoder values (0..127) */
-let knobValues = [64, 64, 127, 0, 64, 64, 64, 64]; /* Defaults */
-let contKnobValues = new Array(16).fill(null).map(() => [64, 64, 64, 38, 64, 64, 64, 64]);
+/* Global param values (0.0-1.0) */
+let globalValues = GLOBAL_DEFAULTS.slice();
 
 /* Track routing */
 let trackRouted = [false, false, false, false];
 
-/* Step presets */
+/* Step presets (scenes on step buttons) */
 let stepPopulated = new Array(16).fill(false);
 let currentStep = -1;
-
-/* Scenes */
-let scenePopulated = new Array(16).fill(false);
-let sceneMode = false;  /* Bottom pads: false=Continuous FX, true=Scene recall */
-
-/* Scene save/delete modifiers */
-let sceneSavePending = false;
-let sceneDeletePending = false;
-let sceneMorphFirst = -1;
 
 /* Step FX sequencer */
 let stepSeqActive = false;
 let stepRecordMode = false;
-let stepSeqDivision = 0; /* 0=1/4, 1=1/8, 2=1/16, 3=1bar */
+let stepSeqDivision = 0;
 let transportRunning = false;
 
 /* Recording */
@@ -194,7 +205,7 @@ let overlayText = '';
 let overlayParam = '';
 let overlayValue = '';
 let overlayTimer = 0;
-const OVERLAY_DURATION = 66; /* ~1.5 seconds at 44 ticks/sec */
+const OVERLAY_DURATION = 66;
 
 /* LED init */
 let ledInitPending = true;
@@ -202,19 +213,16 @@ let ledInitIndex = 0;
 
 /* BPM and tap tempo */
 let bpm = 120.0;
-let tapTimes = []; /* timestamps for tap tempo */
-const TAP_TIMEOUT = 2000; /* ms - reset if gap > 2s */
+let tapTimes = [];
+const TAP_TIMEOUT = 2000;
 const TAP_MIN_TAPS = 2;
 
 /* Audio source */
 let audioSource = 1; /* 0=LINE_IN, 1=MOVE_MIX, 2=TRACKS */
 
-/* Ducker rate */
-let duckerRate = 1; /* 0=1/4, 1=1/8, 2=1/16 */
-
 /* Persistence */
 let autosaveCounter = 0;
-const AUTOSAVE_INTERVAL = 440; /* ~10 seconds at 44 ticks/sec */
+const AUTOSAVE_INTERVAL = 440;
 let currentSetUUID = '';
 let stateLoaded = false;
 
@@ -231,21 +239,19 @@ function getStatePath() {
 
 function saveState() {
     const state = {
-        version: 1,
-        knobValues: knobValues,
-        contKnobValues: contKnobValues,
-        contActive: contActive,
-        selectedCont: selectedCont,
+        version: 2,
+        fxLatched: fxLatched,
+        slotParams: slotParams,
+        globalValues: globalValues,
+        lastTouched: lastTouched,
         stepPopulated: stepPopulated,
-        scenePopulated: scenePopulated,
         currentStep: currentStep,
         audioSource: audioSource,
         trackRouted: trackRouted,
-        duckerRate: duckerRate,
-        bpm: bpm
+        bpm: bpm,
+        stepSeqDivision: stepSeqDivision
     };
 
-    /* Also ask DSP for full state (scenes + step presets are in DSP memory) */
     const dspState = getParam('state');
 
     const fullState = {
@@ -271,20 +277,26 @@ function loadState() {
 
         const fullState = JSON.parse(raw);
         const state = fullState.ui;
-        if (!state || state.version !== 1) return false;
+        if (!state || state.version !== 2) return false;
 
-        if (state.knobValues) knobValues = state.knobValues;
-        if (state.contKnobValues) contKnobValues = state.contKnobValues;
-        if (state.contActive) contActive = state.contActive;
-        if (state.selectedCont !== undefined) selectedCont = state.selectedCont;
+        if (state.fxLatched) fxLatched = state.fxLatched;
+        if (state.slotParams) slotParams = state.slotParams;
+        if (state.globalValues) globalValues = state.globalValues;
+        if (state.lastTouched !== undefined) lastTouched = state.lastTouched;
         if (state.stepPopulated) stepPopulated = state.stepPopulated;
-        if (state.scenePopulated) scenePopulated = state.scenePopulated;
         if (state.currentStep !== undefined) currentStep = state.currentStep;
         if (state.audioSource !== undefined) audioSource = state.audioSource;
-        if (state.duckerRate !== undefined) duckerRate = state.duckerRate;
+        if (state.trackRouted) trackRouted = state.trackRouted;
         if (state.bpm !== undefined) bpm = state.bpm;
+        if (state.stepSeqDivision !== undefined) stepSeqDivision = state.stepSeqDivision;
+
+        /* Push restored state to DSP */
+        sendParam('bpm', String(bpm));
+        sendParam('audio_source', String(audioSource));
+        sendParam('step_seq_division', String(stepSeqDivision));
+
+        /* Restore track routing */
         if (state.trackRouted) {
-            trackRouted = state.trackRouted;
             let mask = 0;
             for (let i = 0; i < 4; i++) {
                 if (trackRouted[i]) mask |= (1 << i);
@@ -292,43 +304,32 @@ function loadState() {
             sendParam('track_mask', String(mask));
         }
 
-        /* Push restored state to DSP */
-        sendParam('bpm', String(bpm));
-        sendParam('audio_source', String(audioSource));
-        sendParam('ducker_rate', String(duckerRate));
-
-        /* Restore knob values to DSP */
-        for (let i = 0; i < 8; i++) {
-            const paramVal = knobValueToParam(i, knobValues[i]);
-            sendParam(DEFAULT_KNOB_PARAMS[i], paramVal.toFixed(3));
+        /* Restore global params */
+        for (let i = 0; i < 4; i++) {
+            sendParam(GLOBAL_PARAMS[i], globalValues[i].toFixed(3));
         }
 
-        /* Restore continuous FX active state and params */
-        for (let i = 0; i < 16; i++) {
-            if (contActive[i]) {
-                sendParam(`cont_${i}_on`, '1');
-                for (let j = 0; j < contKnobValues[i].length; j++) {
-                    sendParam(`cont_${i}_param_${j}`, (contKnobValues[i][j] / 127.0).toFixed(3));
+        /* Restore latched FX */
+        for (let i = 0; i < NUM_SLOTS; i++) {
+            if (fxLatched[i]) {
+                sendParam(`punch_${i}_on`, '100');
+                sendParam(`punch_${i}_latch`, '1');
+                fxActive[i] = true;
+                /* Restore per-slot params */
+                for (let j = 0; j < 4; j++) {
+                    sendParam(`punch_${i}_param_${j}`, slotParams[i][j].toFixed(3));
                 }
             }
+        }
+
+        /* Restore DSP state if available */
+        if (fullState.dsp) {
+            sendParam('restore_state', fullState.dsp);
         }
 
         return true;
     } catch (e) {
         return false;
-    }
-}
-
-function loadDefaults() {
-    try {
-        const raw = host_read_file(DEFAULTS_PATH);
-        if (!raw) return;
-        const defaults = JSON.parse(raw);
-        if (defaults.pressure_curve !== undefined) {
-            sendParam('pressure_curve', String(defaults.pressure_curve));
-        }
-    } catch (e) {
-        /* ignore */
     }
 }
 
@@ -353,18 +354,14 @@ function detectSetUUID() {
 function handleTapTempo() {
     const now = Date.now();
 
-    /* Reset if too long since last tap */
     if (tapTimes.length > 0 && (now - tapTimes[tapTimes.length - 1]) > TAP_TIMEOUT) {
         tapTimes = [];
     }
 
     tapTimes.push(now);
-
-    /* Keep last 8 taps */
     if (tapTimes.length > 8) tapTimes.shift();
 
     if (tapTimes.length >= TAP_MIN_TAPS) {
-        /* Calculate average interval */
         let totalInterval = 0;
         for (let i = 1; i < tapTimes.length; i++) {
             totalInterval += tapTimes[i] - tapTimes[i - 1];
@@ -386,31 +383,28 @@ function handleTapTempo() {
  * LED Management
  * ================================================================ */
 
+function getPadColor(slot) {
+    if (lastTouched === slot && (fxActive[slot] || fxLatched[slot])) {
+        return White;
+    }
+    if (fxLatched[slot]) {
+        return Pulse4th;  /* bright color with pulse animation */
+    }
+    if (fxActive[slot]) {
+        return BRIGHT_COLORS[slot];
+    }
+    return DIM_COLORS[slot];
+}
+
 function buildLedList() {
     const leds = [];
 
-    /* Punch-in pads */
-    for (let i = 0; i < 16; i++) {
+    /* All 32 pads */
+    for (let i = 0; i < NUM_SLOTS; i++) {
         leds.push({
-            note: PUNCH_PADS[i],
-            color: punchActive[i] ? PUNCH_COLORS[i] : PUNCH_DIM_COLORS[i]
+            note: PAD_NOTES[i],
+            color: getPadColor(i)
         });
-    }
-
-    /* Bottom pads: continuous FX or scene mode */
-    if (!sceneMode) {
-        for (let i = 0; i < 16; i++) {
-            let color = contActive[i] ? CONT_COLORS[i] : CONT_DIM_COLORS[i];
-            if (selectedCont === i) color = White;
-            leds.push({ note: CONT_PADS[i], color });
-        }
-    } else {
-        for (let i = 0; i < 16; i++) {
-            leds.push({
-                note: CONT_PADS[i],
-                color: scenePopulated[i] ? getSceneColor(i) : Black
-            });
-        }
     }
 
     /* Step buttons */
@@ -418,19 +412,10 @@ function buildLedList() {
         let color = Black;
         if (stepPopulated[i]) color = LightGrey;
         if (currentStep === i) color = White;
-        if (stepSeqActive && currentStep === i) color = White;
         leds.push({ note: MoveSteps[i], color });
     }
 
     return leds;
-}
-
-function getSceneColor(idx) {
-    /* Color based on scene slot position as proxy for FX category */
-    if (idx < 4) return SkyBlue;      /* delay/reverb-ish */
-    if (idx < 8) return AzureBlue;    /* reverb-ish */
-    if (idx < 12) return BrightGreen; /* modulation */
-    return OrangeRed;                  /* distortion/lofi */
 }
 
 function setupLedBatch() {
@@ -445,9 +430,9 @@ function setupLedBatch() {
     ledInitIndex = end;
     if (ledInitIndex >= leds.length) {
         ledInitPending = false;
-        /* Set button LEDs */
+        /* Button LEDs */
         setButtonLED(MoveUndo, bypassed ? WhiteLedBright : WhiteLedDim);
-        setButtonLED(MoveLoop, sceneMode ? WhiteLedBright : WhiteLedDim);
+        setButtonLED(MoveLoop, stepSeqActive ? WhiteLedBright : WhiteLedDim);
         setButtonLED(MoveCapture, isRecording ? WhiteLedBright : WhiteLedDim);
         setButtonLED(MoveBack, WhiteLedDim);
         setButtonLED(MoveShift, WhiteLedDim);
@@ -463,9 +448,15 @@ function setupLedBatch() {
     }
 }
 
-function updateSinglePadLED(padArray, index, color) {
-    if (index >= 0 && index < padArray.length) {
-        setLED(padArray[index], color);
+function refreshPadLED(slot) {
+    if (slot >= 0 && slot < NUM_SLOTS) {
+        setLED(PAD_NOTES[slot], getPadColor(slot));
+    }
+}
+
+function refreshAllPadLEDs() {
+    for (let i = 0; i < NUM_SLOTS; i++) {
+        setLED(PAD_NOTES[i], getPadColor(i));
     }
 }
 
@@ -476,7 +467,7 @@ function updateSinglePadLED(padArray, index, color) {
 function drawMainView() {
     clear_screen();
 
-    /* Header */
+    /* Line 1: header */
     const sourceLabels = ['IN', 'MIX', 'TRK'];
     const sourceLabel = sourceLabels[audioSource] || 'MIX';
     let trackInfo = '';
@@ -487,82 +478,78 @@ function drawMainView() {
         }
         trackInfo = tracks.length > 0 ? ` ${tracks.join('')}` : '';
     }
-    print(0, 0, `PFX ${bpm.toFixed(0)} ${sourceLabel}${trackInfo}`, 1);
+
+    /* Count active FX */
+    let activeCount = 0;
+    for (let i = 0; i < NUM_SLOTS; i++) {
+        if (fxActive[i]) activeCount++;
+    }
+    print(0, 0, `PFX ${bpm.toFixed(0)} ${sourceLabel}${trackInfo} [${activeCount}]`, 1);
     draw_line(0, 9, SCREEN_W, 9, 1);
 
-    /* Active punch-ins */
-    let punchStr = '';
-    for (let i = 0; i < 16; i++) {
-        if (punchActive[i]) {
-            if (punchStr.length > 0) punchStr += '+';
-            punchStr += PUNCH_NAMES[i];
+    /* Lines 2-3: names of active/latched FX */
+    let activeLine1 = '';
+    let activeLine2 = '';
+    for (let i = 0; i < NUM_SLOTS; i++) {
+        if (fxActive[i] || fxLatched[i]) {
+            const name = FX_NAMES[i];
+            const tag = fxLatched[i] ? '*' : '';
+            const entry = name + tag;
+            if (activeLine1.length === 0) {
+                activeLine1 = entry;
+            } else if (activeLine1.length + entry.length + 1 <= 21) {
+                activeLine1 += ' ' + entry;
+            } else if (activeLine2.length === 0) {
+                activeLine2 = entry;
+            } else if (activeLine2.length + entry.length + 1 <= 21) {
+                activeLine2 += ' ' + entry;
+            }
         }
     }
-    if (punchStr.length > 0) {
-        if (punchStr.length > 21) punchStr = punchStr.substring(0, 20) + '~';
-        print(0, 12, `P:${punchStr}`, 1);
-
-        /* Pressure bar for first active punch-in */
-        let firstActive = punchActive.indexOf(true);
-        if (firstActive >= 0) {
-            let barWidth = Math.floor(punchPressure[firstActive] * 60);
-            fill_rect(60, 13, barWidth, 5, 1);
-            draw_rect(60, 13, 60, 5, 1);
-        }
-    }
-
-    /* Active continuous FX */
-    let contStr = '';
-    let contCount = 0;
-    for (let i = 0; i < 16; i++) {
-        if (contActive[i]) {
-            if (contStr.length > 0) contStr += '  ';
-            contStr += CONT_NAMES[i];
-            contCount++;
-        }
-    }
-    if (contCount > 0) {
-        print(0, 22, contStr, 1);
+    if (activeLine1.length > 0) {
+        print(0, 12, activeLine1, 1);
     } else {
-        print(0, 22, 'No FX active', 1);
+        print(0, 12, 'No FX active', 1);
+    }
+    if (activeLine2.length > 0) {
+        print(0, 21, activeLine2, 1);
     }
 
-    /* Encoder labels */
-    draw_line(0, 40, SCREEN_W, 40, 1);
+    /* Separator */
+    draw_line(0, 30, SCREEN_W, 30, 1);
 
-    if (selectedCont >= 0 && contActive[selectedCont]) {
-        const labels = CONT_PARAM_LABELS[selectedCont];
-        const name = CONT_NAMES[selectedCont];
-        print(0, 42, `${name}:`, 1);
+    /* Line 4: E1-E4 labels from lastTouched pad */
+    if (lastTouched >= 0 && (fxActive[lastTouched] || fxLatched[lastTouched])) {
+        const labels = FX_PARAM_LABELS[lastTouched];
+        const name = FX_NAMES[lastTouched];
+        /* Truncate name to fit */
+        const shortName = name.length > 8 ? name.substring(0, 7) + '~' : name;
+        print(0, 33, shortName, 1);
         for (let i = 0; i < 4; i++) {
-            print(i * 32, 51, labels[i], 1);
+            const lbl = labels[i].substring(0, 5);
+            print(50 + i * 20, 33, lbl, 1);
         }
-        /* Show secondary params indicator */
-        print(100, 42, 'E5-8', 1);
     } else {
-        for (let i = 0; i < 4; i++) {
-            print(i * 32, 42, DEFAULT_KNOB_LABELS[i].substring(0, 6), 1);
-        }
-        for (let i = 4; i < 8; i++) {
-            print((i - 4) * 32, 51, DEFAULT_KNOB_LABELS[i].substring(0, 6), 1);
-        }
+        print(0, 33, 'Touch a pad', 1);
     }
 
-    /* Bypass indicator */
-    if (bypassed) {
-        draw_rect(30, 20, 68, 14, 1);
-        fill_rect(31, 21, 66, 12, 0);
-        print(38, 23, 'BYPASSED', 1);
+    /* Line 5: E5-E8 labels always */
+    for (let i = 0; i < 4; i++) {
+        print(i * 32, 44, GLOBAL_LABELS[i], 1);
     }
 
-    /* Mode indicators */
-    if (sceneMode) {
-        print(90, 0, 'SCN', 1);
-    }
+    /* Step seq / record mode indicators */
     if (stepRecordMode) {
         print(105, 0, 'REC', 1);
     } else if (stepSeqActive) {
         print(105, 0, 'SEQ', 1);
+    }
+
+    /* Bypass overlay */
+    if (bypassed) {
+        draw_rect(30, 16, 68, 14, 1);
+        fill_rect(31, 17, 66, 12, 0);
+        print(38, 19, 'BYPASSED', 1);
     }
 }
 
@@ -603,27 +590,6 @@ function getParam(key) {
     return host_module_get_param(key);
 }
 
-function knobToLabel(knobIndex) {
-    if (selectedCont >= 0 && contActive[selectedCont]) {
-        if (knobIndex < 4) {
-            return CONT_PARAM_LABELS[selectedCont][knobIndex];
-        }
-        return `Param ${knobIndex + 1}`;
-    }
-    return DEFAULT_KNOB_LABELS[knobIndex];
-}
-
-function knobValueToParam(knobIndex, value) {
-    const param = DEFAULT_KNOB_PARAMS[knobIndex];
-    if (param === 'input_gain' || param === 'output_gain') {
-        return (value / 127.0) * 2.0;
-    }
-    if (param === 'eq_low' || param === 'eq_mid' || param === 'eq_high') {
-        return (value / 127.0) * 2.0 - 1.0;
-    }
-    return value / 127.0;
-}
-
 function showOverlay(title, param, value) {
     overlayText = title;
     overlayParam = param;
@@ -639,175 +605,134 @@ function showOverlay(title, param, value) {
  * ================================================================ */
 
 function handlePadOn(note, velocity) {
-    const punchIdx = PUNCH_PADS.indexOf(note);
-    if (punchIdx >= 0) {
-        punchActive[punchIdx] = true;
-        punchPressure[punchIdx] = velocity / 127.0;
-        sendParam(`punch_${punchIdx}_on`, (velocity / 127.0).toFixed(3));
-        updateSinglePadLED(PUNCH_PADS, punchIdx, PUNCH_COLORS[punchIdx]);
-        return;
-    }
+    const slot = NOTE_TO_SLOT[note];
+    if (slot === undefined) return;
 
-    const contIdx = CONT_PADS.indexOf(note);
-    if (contIdx >= 0) {
-        if (sceneMode) {
-            /* Scene mode: save, delete, morph, or recall */
-            if (sceneSavePending) {
-                sendParam(`scene_save_${contIdx}`, '1');
-                scenePopulated[contIdx] = true;
-                sceneSavePending = false;
-                showOverlay('Scene', `Saved #${contIdx + 1}`, '');
-                ledInitPending = true; ledInitIndex = 0;
-            } else if (sceneDeletePending) {
-                sendParam(`scene_clear_${contIdx}`, '1');
-                scenePopulated[contIdx] = false;
-                sceneDeletePending = false;
-                showOverlay('Scene', `Cleared #${contIdx + 1}`, '');
-                ledInitPending = true; ledInitIndex = 0;
-            } else if (shiftHeld) {
-                /* Shift+pad in scene mode = scene morph */
-                if (sceneMorphFirst < 0) {
-                    sceneMorphFirst = contIdx;
-                    showOverlay('Morph', `From #${contIdx + 1}...`, 'Hold Shift + press 2nd');
-                } else {
-                    sendParam(`scene_morph_${sceneMorphFirst}_${contIdx}`, '1');
-                    showOverlay('Morph', `#${sceneMorphFirst + 1} > #${contIdx + 1}`, '~2s');
-                    sceneMorphFirst = -1;
-                }
-            } else {
-                sceneMorphFirst = -1;
-                sendParam(`scene_recall_${contIdx}`, '1');
-                showOverlay('Scene', `Recall #${contIdx + 1}`, '');
-            }
-            return;
-        }
-
-        /* Normal continuous FX mode */
-        if (contActive[contIdx]) {
-            if (shiftHeld) {
-                /* Shift+tap: deactivate */
-                sendParam(`cont_${contIdx}_off`, '1');
-                contActive[contIdx] = false;
-                if (selectedCont === contIdx) selectedCont = -1;
-                showOverlay(CONT_NAMES[contIdx], 'Deactivated', '');
-            } else if (selectedCont === contIdx) {
-                /* Already selected — deselect (return to global knobs) */
-                selectedCont = -1;
-                showOverlay(CONT_NAMES[contIdx], 'Deselected', '');
-            } else {
-                /* Active but not selected — select for encoder control */
-                selectedCont = contIdx;
-                showOverlay(CONT_NAMES[contIdx], 'Selected', '');
-            }
+    if (shiftHeld) {
+        /* Shift+hold = latch toggle */
+        if (fxLatched[slot]) {
+            /* Unlatch */
+            fxLatched[slot] = false;
+            fxActive[slot] = false;
+            sendParam(`punch_${slot}_latch`, '0');
+            sendParam(`punch_${slot}_off`, '1');
+            showOverlay(FX_NAMES[slot], 'Unlatched', '');
         } else {
-            /* Inactive — activate and select */
-            /* Check max 3 simultaneous limit */
-            let activeCount = contActive.filter(a => a).length;
-            if (activeCount >= 3) {
-                showOverlay('Max FX', '3 active limit', '');
-                return;
-            }
-            sendParam(`cont_${contIdx}_on`, '1');
-            contActive[contIdx] = true;
-            selectedCont = contIdx;
-            showOverlay(CONT_NAMES[contIdx], 'Activated', '');
+            /* Latch on */
+            fxLatched[slot] = true;
+            fxActive[slot] = true;
+            sendParam(`punch_${slot}_on`, String(velocity));
+            sendParam(`punch_${slot}_latch`, '1');
+            showOverlay(FX_NAMES[slot], 'Latched', '');
         }
-        /* Update LEDs for all cont pads to show selection */
-        for (let i = 0; i < 16; i++) {
-            let color = contActive[i] ? CONT_COLORS[i] : CONT_DIM_COLORS[i];
-            if (selectedCont === i) color = White;
-            updateSinglePadLED(CONT_PADS, i, color);
-        }
-        return;
+    } else {
+        /* Normal punch-in: hold = on */
+        fxActive[slot] = true;
+        sendParam(`punch_${slot}_on`, String(velocity));
     }
+
+    /* Update last touched for E1-E4 focus */
+    const prevTouched = lastTouched;
+    lastTouched = slot;
+    if (prevTouched >= 0 && prevTouched !== slot) {
+        refreshPadLED(prevTouched);
+    }
+    refreshPadLED(slot);
 }
 
 function handlePadOff(note) {
-    const punchIdx = PUNCH_PADS.indexOf(note);
-    if (punchIdx >= 0) {
-        punchActive[punchIdx] = false;
-        punchPressure[punchIdx] = 0;
-        sendParam(`punch_${punchIdx}_off`, '1');
-        updateSinglePadLED(PUNCH_PADS, punchIdx, PUNCH_DIM_COLORS[punchIdx]);
-        return;
-    }
+    const slot = NOTE_TO_SLOT[note];
+    if (slot === undefined) return;
+
+    /* If latched, pad release does nothing */
+    if (fxLatched[slot]) return;
+
+    /* Normal release */
+    fxActive[slot] = false;
+    sendParam(`punch_${slot}_off`, '1');
+    refreshPadLED(slot);
 }
 
 function handleAftertouch(note, pressure) {
-    const punchIdx = PUNCH_PADS.indexOf(note);
-    if (punchIdx >= 0 && punchActive[punchIdx]) {
-        punchPressure[punchIdx] = pressure / 127.0;
-        sendParam(`punch_${punchIdx}_pressure`, (pressure / 127.0).toFixed(3));
-        updateSinglePadLED(PUNCH_PADS, punchIdx,
-            pressure > 80 ? White : PUNCH_COLORS[punchIdx]);
-    }
+    const slot = NOTE_TO_SLOT[note];
+    if (slot === undefined) return;
+    if (!fxActive[slot]) return;
+
+    sendParam(`punch_${slot}_pressure`, (pressure / 127.0).toFixed(3));
 }
 
 function handleStep(stepIdx, pressed) {
     if (!pressed) return;
 
     if (shiftHeld) {
-        sendParam(`step_save_${stepIdx}`, '1');
+        /* Shift+step = save scene */
+        sendParam(`scene_save_${stepIdx}`, '1');
         stepPopulated[stepIdx] = true;
         currentStep = stepIdx;
         setLED(MoveSteps[stepIdx], White);
-        showOverlay('Step Preset', `Saved #${stepIdx + 1}`, '');
+        showOverlay('Scene', `Saved #${stepIdx + 1}`, '');
     } else if (stepRecordMode) {
+        /* Step record mode: write step */
         sendParam(`step_save_${stepIdx}`, '1');
         stepPopulated[stepIdx] = true;
         setLED(MoveSteps[stepIdx], BrightRed);
         showOverlay('Step Record', `Written #${stepIdx + 1}`, '');
     } else {
+        /* Tap = recall scene */
         if (stepPopulated[stepIdx]) {
-            sendParam(`step_recall_${stepIdx}`, '1');
-            if (currentStep >= 0) setLED(MoveSteps[currentStep], LightGrey);
+            sendParam(`scene_recall_${stepIdx}`, '1');
+            if (currentStep >= 0) setLED(MoveSteps[currentStep], stepPopulated[currentStep] ? LightGrey : Black);
             currentStep = stepIdx;
             setLED(MoveSteps[stepIdx], White);
-            showOverlay('Step Preset', `Recalled #${stepIdx + 1}`, '');
-            syncContActiveState();
+            showOverlay('Scene', `Recalled #${stepIdx + 1}`, '');
+            syncFxState();
         }
     }
 }
 
 function handleKnob(knobIndex, delta) {
-    if (selectedCont >= 0 && contActive[selectedCont]) {
-        /* All 8 knobs control the selected continuous FX */
-        const values = contKnobValues[selectedCont];
-        /* Ensure we have 8 values */
-        while (values.length < 8) values.push(64);
-        values[knobIndex] = Math.max(0, Math.min(127, values[knobIndex] + delta));
-        const param = `cont_${selectedCont}_param_${knobIndex}`;
-        const label = knobToLabel(knobIndex);
-        sendParam(param, (values[knobIndex] / 127.0).toFixed(3));
-        showOverlay(CONT_NAMES[selectedCont], label,
-            (values[knobIndex] / 127.0).toFixed(2));
+    if (knobIndex < 4) {
+        /* E1-E4: per-slot params for lastTouched */
+        if (lastTouched < 0 || (!fxActive[lastTouched] && !fxLatched[lastTouched])) {
+            showOverlay('E1-E4', 'Touch a pad first', '');
+            return;
+        }
+        const slot = lastTouched;
+        let v = slotParams[slot][knobIndex] + delta * 0.01;
+        v = Math.max(0.0, Math.min(1.0, v));
+        slotParams[slot][knobIndex] = v;
+        sendParam(`punch_${slot}_param_${knobIndex}`, v.toFixed(3));
+        const label = FX_PARAM_LABELS[slot][knobIndex];
+        showOverlay(FX_NAMES[slot], label, v.toFixed(2));
     } else {
-        knobValues[knobIndex] = Math.max(0, Math.min(127, knobValues[knobIndex] + delta));
-        const label = DEFAULT_KNOB_LABELS[knobIndex];
-        const paramVal = knobValueToParam(knobIndex, knobValues[knobIndex]);
-        sendParam(DEFAULT_KNOB_PARAMS[knobIndex], paramVal.toFixed(3));
-        showOverlay('Global', label, (knobValues[knobIndex] / 127.0).toFixed(2));
+        /* E5-E8: global params */
+        const gi = knobIndex - 4;
+        let v = globalValues[gi] + delta * 0.01;
+        v = Math.max(0.0, Math.min(1.0, v));
+        globalValues[gi] = v;
+        sendParam(GLOBAL_PARAMS[gi], v.toFixed(3));
+        showOverlay('Global', GLOBAL_LABELS[gi], v.toFixed(2));
     }
 }
 
-function handleMasterKnob(rawValue) {
-    const delta = decodeDelta(rawValue);
-    if (delta === 0) return;
+function handleKnobPeek(knobNote) {
+    /* Capacitive touch notes: 0=E1 .. 7=E8, 8=Master, 9=Jog */
+    if (knobNote === 9) return;
+    if (knobNote === 8) return; /* Master knob = volume passthrough, no peek */
 
-    if (selectedCont >= 0 && contActive[selectedCont]) {
-        /* Dry/wet for selected FX */
-        let mixIdx = 3;
-        let v = (contKnobValues[selectedCont][mixIdx] || 64) + delta;
-        v = Math.max(0, Math.min(127, v));
-        contKnobValues[selectedCont][mixIdx] = v;
-        sendParam(`cont_${selectedCont}_param_${mixIdx}`, (v / 127.0).toFixed(3));
-        showOverlay(CONT_NAMES[selectedCont], 'Mix', (v / 127.0).toFixed(2));
-    } else {
-        let v = (knobValues[7] || 64) + delta;
-        v = Math.max(0, Math.min(127, v));
-        knobValues[7] = v;
-        sendParam('output_gain', (v / 127.0 * 2.0).toFixed(3));
-        showOverlay('Master', 'Output', (v / 127.0).toFixed(2));
+    if (knobNote >= 0 && knobNote < 4) {
+        /* E1-E4: show per-slot param */
+        if (lastTouched >= 0 && (fxActive[lastTouched] || fxLatched[lastTouched])) {
+            const label = FX_PARAM_LABELS[lastTouched][knobNote];
+            const v = slotParams[lastTouched][knobNote];
+            showOverlay(FX_NAMES[lastTouched], label, v.toFixed(2));
+        } else {
+            showOverlay('E1-E4', 'Touch a pad', '');
+        }
+    } else if (knobNote >= 4 && knobNote < 8) {
+        /* E5-E8: show global param */
+        const gi = knobNote - 4;
+        showOverlay('Global', GLOBAL_LABELS[gi], globalValues[gi].toFixed(2));
     }
 }
 
@@ -815,38 +740,32 @@ function handleTrackButton(trackIdx, pressed) {
     if (!pressed) return;
 
     if (shiftHeld) {
-        /* Shift+Track: solo this track (exclusive select) */
+        /* Shift+Track: solo */
         for (let i = 0; i < 4; i++) {
             trackRouted[i] = (i === trackIdx);
         }
     } else {
-        /* Toggle this track in the mix */
         trackRouted[trackIdx] = !trackRouted[trackIdx];
     }
 
-    /* Update track mask and send to DSP */
     let mask = 0;
     for (let i = 0; i < 4; i++) {
         if (trackRouted[i]) mask |= (1 << i);
     }
     sendParam('track_mask', String(mask));
 
-    /* If any track is selected, switch to tracks source mode */
     if (mask > 0 && audioSource !== 2) {
-        audioSource = 2; /* SOURCE_TRACKS */
+        audioSource = 2;
         sendParam('audio_source', '2');
     } else if (mask === 0 && audioSource === 2) {
-        /* No tracks selected — fall back to Move mix */
-        audioSource = 1; /* SOURCE_MOVE_MIX */
+        audioSource = 1;
         sendParam('audio_source', '1');
     }
 
-    /* Update LEDs */
     for (let i = 0; i < 4; i++) {
         setButtonLED(TRACK_CCS[i], trackRouted[i] ? WhiteLedBright : WhiteLedDim);
     }
 
-    /* Show feedback */
     let trackList = [];
     for (let i = 0; i < 4; i++) {
         if (trackRouted[i]) trackList.push(`T${i + 1}`);
@@ -854,28 +773,54 @@ function handleTrackButton(trackIdx, pressed) {
     showOverlay('Source', trackList.length > 0 ? `Tracks: ${trackList.join('+')}` : 'Move Mix', '');
 }
 
-function syncContActiveState() {
-    try {
-        const activeStr = getParam('cont_active');
-        if (activeStr) {
-            const active = JSON.parse(activeStr);
-            for (let i = 0; i < 16; i++) {
-                contActive[i] = active[i] === 1;
-            }
-        }
-    } catch (e) {
-        /* ignore parse errors */
+function handleJogScroll(delta) {
+    /* Scroll through active/latched FX to change lastTouched for E1-E4 */
+    let activeSlots = [];
+    for (let i = 0; i < NUM_SLOTS; i++) {
+        if (fxActive[i] || fxLatched[i]) activeSlots.push(i);
     }
+    if (activeSlots.length === 0) return;
+
+    let curIdx = activeSlots.indexOf(lastTouched);
+    if (curIdx < 0) curIdx = 0;
+    curIdx = (curIdx + (delta > 0 ? 1 : -1) + activeSlots.length) % activeSlots.length;
+
+    const prevTouched = lastTouched;
+    lastTouched = activeSlots[curIdx];
+
+    if (prevTouched >= 0 && prevTouched !== lastTouched) {
+        refreshPadLED(prevTouched);
+    }
+    refreshPadLED(lastTouched);
+    showOverlay(FX_NAMES[lastTouched], 'E1-E4 Focus', '');
 }
 
-function syncScenePopulatedState() {
+function syncFxState() {
     try {
-        const raw = getParam('scene_populated');
-        if (raw) {
-            const arr = JSON.parse(raw);
-            for (let i = 0; i < 16; i++) {
-                scenePopulated[i] = arr[i] === 1;
+        const activeStr = getParam('fx_active');
+        if (activeStr) {
+            const active = JSON.parse(activeStr);
+            for (let i = 0; i < NUM_SLOTS; i++) {
+                fxActive[i] = active[i] === 1;
             }
+        }
+    } catch (e) { /* ignore */ }
+
+    try {
+        const latchedStr = getParam('fx_latched');
+        if (latchedStr) {
+            const latched = JSON.parse(latchedStr);
+            for (let i = 0; i < NUM_SLOTS; i++) {
+                fxLatched[i] = latched[i] === 1;
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+    try {
+        const ltStr = getParam('last_touched');
+        if (ltStr) {
+            const lt = parseInt(ltStr, 10);
+            if (lt >= 0 && lt < NUM_SLOTS) lastTouched = lt;
         }
     } catch (e) { /* ignore */ }
 }
@@ -897,28 +842,22 @@ function syncStepPopulatedState() {
  * ================================================================ */
 
 globalThis.init = function() {
-    console.log('Performance FX module initializing');
+    console.log('Performance FX v2 module initializing');
 
-    /* Detect current set for per-set persistence */
     detectSetUUID();
-
-    /* Load global defaults (pressure curve, etc.) */
-    loadDefaults();
-
-    /* Try to load per-set state */
     stateLoaded = loadState();
 
     if (!stateLoaded) {
-        /* Fresh start - push defaults to DSP */
+        /* Fresh start - push defaults */
         sendParam('bpm', String(bpm));
         sendParam('audio_source', String(audioSource));
+        for (let i = 0; i < 4; i++) {
+            sendParam(GLOBAL_PARAMS[i], GLOBAL_DEFAULTS[i].toFixed(3));
+        }
     }
 
-    /* Sync scene/step populated state from DSP */
-    syncScenePopulatedState();
     syncStepPopulatedState();
 
-    /* Start progressive LED init */
     ledInitPending = true;
     ledInitIndex = 0;
 };
@@ -938,7 +877,7 @@ globalThis.tick = function() {
                 if (currentStep >= 0) setLED(MoveSteps[currentStep], stepPopulated[currentStep] ? LightGrey : Black);
                 currentStep = newStep;
                 setLED(MoveSteps[currentStep], White);
-                syncContActiveState();
+                syncFxState();
             }
         }
     }
@@ -964,10 +903,15 @@ globalThis.onMidiMessageInternal = function(data) {
     const d1 = data[1];
     const d2 = data[2];
 
-    /* Filter capacitive touch, noise, and clock, but NOT aftertouch */
-    if (isCapacitiveTouchMessage(data)) return;
-    if (isNoiseMessage(data)) return;
+    /* Filter clock and sysex noise, but NOT aftertouch or capacitive touch */
     if (data[0] === 0xF8 || data[0] === 0xF0 || data[0] === 0xF7) return;
+
+    /* Capacitive touch on knobs (notes 0-9) = knob peek */
+    if (status === 0x90 && d1 < 10 && d2 > 0) {
+        handleKnobPeek(d1);
+        return;
+    }
+    if (status === 0x80 && d1 < 10) return;
 
     /* Polyphonic aftertouch - pad pressure */
     if (status === 0xA0) {
@@ -975,11 +919,10 @@ globalThis.onMidiMessageInternal = function(data) {
         return;
     }
 
-    /* Channel aftertouch - global pressure for all active punch-ins */
+    /* Channel aftertouch - broadcast to all active punch-ins */
     if (status === 0xD0) {
-        for (let i = 0; i < 16; i++) {
-            if (punchActive[i]) {
-                punchPressure[i] = d1 / 127.0;
+        for (let i = 0; i < NUM_SLOTS; i++) {
+            if (fxActive[i]) {
                 sendParam(`punch_${i}_pressure`, (d1 / 127.0).toFixed(3));
             }
         }
@@ -998,14 +941,18 @@ globalThis.onMidiMessageInternal = function(data) {
                 return;
             }
         } else {
-            handlePadOff(d1);
-            return;
+            if (d1 >= 68 && d1 <= 99) {
+                handlePadOff(d1);
+                return;
+            }
         }
     }
 
     /* Note Off */
     if (status === 0x80) {
-        handlePadOff(d1);
+        if (d1 >= 68 && d1 <= 99) {
+            handlePadOff(d1);
+        }
         return;
     }
 
@@ -1014,21 +961,15 @@ globalThis.onMidiMessageInternal = function(data) {
         /* Shift */
         if (d1 === MoveShift) {
             shiftHeld = d2 > 0;
-            if (!shiftHeld) {
-                sceneMorphFirst = -1;
-                sceneSavePending = false;
-                sceneDeletePending = false;
-            }
             return;
         }
 
-        /* Back - exit module */
+        /* Back - CLEAN EXIT */
         if (d1 === MoveBack && d2 > 0) {
-            /* Save state before exiting */
             saveState();
-            /* Deactivate all FX before exit */
-            for (let i = 0; i < 16; i++) {
-                if (contActive[i]) sendParam(`cont_${i}_off`, '1');
+            for (let i = 0; i < NUM_SLOTS; i++) {
+                sendParam(`punch_${i}_off`, '1');
+                sendParam(`punch_${i}_latch`, '0');
             }
             sendParam('bypass', '1');
             host_exit_module();
@@ -1040,21 +981,18 @@ globalThis.onMidiMessageInternal = function(data) {
             if (d2 > 0) {
                 undoHeld = true;
                 undoWasBypassed = bypassed;
-                /* Always bypass on press */
                 if (!bypassed) {
                     bypassed = true;
                     sendParam('bypass', '1');
                     setButtonLED(MoveUndo, WhiteLedBright);
                     showOverlay('FX', 'BYPASSED', '');
                 } else {
-                    /* Was already bypassed — toggle off */
                     bypassed = false;
                     sendParam('bypass', '0');
                     setButtonLED(MoveUndo, WhiteLedDim);
                     showOverlay('FX', 'ACTIVE', '');
                 }
             } else {
-                /* Release: if we turned bypass ON and it wasn't on before, restore (momentary) */
                 if (undoHeld && bypassed && !undoWasBypassed) {
                     bypassed = false;
                     sendParam('bypass', '0');
@@ -1065,58 +1003,46 @@ globalThis.onMidiMessageInternal = function(data) {
             return;
         }
 
-        /* Loop - toggle scene mode */
+        /* Loop - toggle step sequencer on/off */
         if (d1 === MoveLoop && d2 > 0) {
-            if (shiftHeld) {
-                /* Shift+Loop: toggle step FX sequencer */
-                stepSeqActive = !stepSeqActive;
-                sendParam('step_seq_active', stepSeqActive ? '1' : '0');
-                showOverlay('Step FX Seq', stepSeqActive ? 'ON' : 'OFF', '');
-            } else {
-                /* Toggle scene mode */
-                sceneMode = !sceneMode;
-                if (sceneMode) {
-                    showOverlay('Bottom Pads', 'Scene Mode', '');
-                } else {
-                    showOverlay('Bottom Pads', 'FX Mode', '');
-                }
-                ledInitPending = true;
-                ledInitIndex = 0;
-            }
-            setButtonLED(MoveLoop, sceneMode ? WhiteLedBright : WhiteLedDim);
+            stepSeqActive = !stepSeqActive;
+            sendParam('step_seq_active', stepSeqActive ? '1' : '0');
+            setButtonLED(MoveLoop, stepSeqActive ? WhiteLedBright : WhiteLedDim);
+            showOverlay('Step Seq', stepSeqActive ? 'ON' : 'OFF', '');
             return;
         }
 
-        /* Copy - save scene / cycle ducker rate */
+        /* Copy - cycle audio source */
         if (d1 === MoveCopy && d2 > 0) {
-            if (sceneMode) {
-                sceneSavePending = true;
-                sceneDeletePending = false;
-                showOverlay('Scene', 'Press pad to save', '');
+            audioSource = (audioSource + 1) % 3;
+            sendParam('audio_source', String(audioSource));
+            const sourceNames = ['Line In', 'Move Mix', 'Tracks'];
+            showOverlay('Source', sourceNames[audioSource], '');
+
+            if (audioSource !== 2) {
+                for (let i = 0; i < 4; i++) trackRouted[i] = false;
+                sendParam('track_mask', '0');
+                for (let i = 0; i < 4; i++) {
+                    setButtonLED(TRACK_CCS[i], WhiteLedDim);
+                }
             } else {
-                /* Cycle ducker rate: 1/4 -> 1/8 -> 1/16 */
-                const duckerNames = ['1/4', '1/8', '1/16'];
-                duckerRate = (duckerRate + 1) % 3;
-                sendParam('ducker_rate', String(duckerRate));
-                showOverlay('Ducker', `Rate: ${duckerNames[duckerRate]}`, '');
+                for (let i = 0; i < 4; i++) trackRouted[i] = true;
+                sendParam('track_mask', '15');
+                for (let i = 0; i < 4; i++) {
+                    setButtonLED(TRACK_CCS[i], WhiteLedBright);
+                }
             }
             return;
         }
 
-        /* Delete */
+        /* Delete - Shift+Delete clears current step */
         if (d1 === MoveDelete && d2 > 0) {
-            if (sceneMode) {
-                sceneDeletePending = true;
-                sceneSavePending = false;
-                showOverlay('Scene', 'Press pad to clear', '');
-            } else if (shiftHeld) {
-                if (currentStep >= 0) {
-                    sendParam(`step_clear_${currentStep}`, '1');
-                    stepPopulated[currentStep] = false;
-                    setLED(MoveSteps[currentStep], Black);
-                    showOverlay('Step Preset', `Cleared #${currentStep + 1}`, '');
-                    currentStep = -1;
-                }
+            if (shiftHeld && currentStep >= 0) {
+                sendParam(`step_clear_${currentStep}`, '1');
+                stepPopulated[currentStep] = false;
+                setLED(MoveSteps[currentStep], Black);
+                showOverlay('Scene', `Cleared #${currentStep + 1}`, '');
+                currentStep = -1;
             }
             return;
         }
@@ -1129,26 +1055,7 @@ globalThis.onMidiMessageInternal = function(data) {
             return;
         }
 
-        /* Capture - Resample */
-        if (d1 === MoveCapture && d2 > 0) {
-            if (isRecording) {
-                host_sampler_stop();
-                isRecording = false;
-                showOverlay('Resample', 'Stopped', '');
-                setButtonLED(MoveCapture, WhiteLedDim);
-            } else {
-                const now = new Date();
-                const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
-                const path = `/data/UserData/UserLibrary/Recordings/pfx_${ts}.wav`;
-                host_sampler_start(path);
-                isRecording = true;
-                showOverlay('Resample', 'Recording...', '');
-                setButtonLED(MoveCapture, WhiteLedBright);
-            }
-            return;
-        }
-
-        /* Play - toggle transport for step sequencer */
+        /* Play - transport start/stop */
         if (d1 === MovePlay && d2 > 0) {
             transportRunning = !transportRunning;
             sendParam('transport_running', transportRunning ? '1' : '0');
@@ -1157,38 +1064,36 @@ globalThis.onMidiMessageInternal = function(data) {
             return;
         }
 
+        /* Capture - record output to WAV */
+        if (d1 === MoveCapture && d2 > 0) {
+            if (isRecording) {
+                host_sampler_stop();
+                isRecording = false;
+                showOverlay('Record', 'Stopped', '');
+                setButtonLED(MoveCapture, WhiteLedDim);
+            } else {
+                const now = new Date();
+                const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+                const path = `/data/UserData/UserLibrary/Recordings/pfx_${ts}.wav`;
+                host_sampler_start(path);
+                isRecording = true;
+                showOverlay('Record', 'Recording...', '');
+                setButtonLED(MoveCapture, WhiteLedBright);
+            }
+            return;
+        }
+
         /* Jog wheel turn */
         if (d1 === MoveMainKnob) {
             const delta = decodeDelta(d2);
-            if (shiftHeld && stepSeqActive) {
-                /* Shift+Jog when step seq active: change division */
-                const divNames = ['1/4', '1/8', '1/16', '1 bar'];
-                stepSeqDivision = (stepSeqDivision + (delta > 0 ? 1 : -1) + 4) % 4;
-                sendParam('step_seq_division', String(stepSeqDivision));
-                showOverlay('Step Seq', `Div: ${divNames[stepSeqDivision]}`, '');
-            } else if (shiftHeld) {
-                /* Shift+Jog: adjust BPM */
+            if (shiftHeld) {
+                /* Shift+Turn = BPM fine */
                 bpm = Math.max(20, Math.min(300, bpm + delta * 0.5));
                 sendParam('bpm', bpm.toFixed(1));
                 showOverlay('Tempo', `${bpm.toFixed(1)} BPM`, (bpm / 300).toFixed(2));
-            } else if (selectedCont >= 0 && contActive[selectedCont]) {
-                /* Jog turn: scroll through active continuous FX */
-                let activeSlots = [];
-                for (let i = 0; i < 16; i++) {
-                    if (contActive[i]) activeSlots.push(i);
-                }
-                if (activeSlots.length > 1) {
-                    let curIdx = activeSlots.indexOf(selectedCont);
-                    curIdx = (curIdx + delta + activeSlots.length) % activeSlots.length;
-                    selectedCont = activeSlots[curIdx];
-                    showOverlay(CONT_NAMES[selectedCont], 'Selected', '');
-                    /* Refresh cont pad LEDs */
-                    for (let i = 0; i < 16; i++) {
-                        let color = contActive[i] ? CONT_COLORS[i] : CONT_DIM_COLORS[i];
-                        if (selectedCont === i) color = White;
-                        if (!sceneMode) updateSinglePadLED(CONT_PADS, i, color);
-                    }
-                }
+            } else {
+                /* Turn = scroll through active/latched FX */
+                handleJogScroll(delta);
             }
             return;
         }
@@ -1196,28 +1101,13 @@ globalThis.onMidiMessageInternal = function(data) {
         /* Jog click */
         if (d1 === MoveMainButton && d2 > 0) {
             if (shiftHeld) {
-                /* Shift+Jog click: cycle audio source mode */
+                /* Shift+Click = cycle audio source */
                 audioSource = (audioSource + 1) % 3;
                 sendParam('audio_source', String(audioSource));
                 const sourceNames = ['Line In', 'Move Mix', 'Tracks'];
                 showOverlay('Source', sourceNames[audioSource], '');
-                /* Reset track selection when switching away from tracks mode */
-                if (audioSource !== 2) {
-                    for (let i = 0; i < 4; i++) trackRouted[i] = false;
-                    sendParam('track_mask', '0');
-                    for (let i = 0; i < 4; i++) {
-                        setButtonLED(TRACK_CCS[i], WhiteLedDim);
-                    }
-                } else {
-                    /* Entering tracks mode: select all by default */
-                    for (let i = 0; i < 4; i++) trackRouted[i] = true;
-                    sendParam('track_mask', '15');
-                    for (let i = 0; i < 4; i++) {
-                        setButtonLED(TRACK_CCS[i], WhiteLedBright);
-                    }
-                }
             } else {
-                /* Jog click: tap tempo */
+                /* Click = tap tempo */
                 handleTapTempo();
             }
             return;
@@ -1231,11 +1121,7 @@ globalThis.onMidiMessageInternal = function(data) {
             return;
         }
 
-        /* Master knob */
-        if (d1 === MoveMaster) {
-            handleMasterKnob(d2);
-            return;
-        }
+        /* Master knob - DO NOT intercept CC 79, let it pass through for volume */
 
         /* Track buttons */
         for (let i = 0; i < 4; i++) {
