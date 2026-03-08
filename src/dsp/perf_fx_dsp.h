@@ -1,9 +1,11 @@
 /*
- * Performance FX DSP Engine
+ * Performance FX DSP Engine v2
  *
- * All audio effects for the Performance FX module.
- * 16 punch-in FX (momentary, pressure-sensitive)
- * 16 continuous FX (toggled, parameter-controlled)
+ * 32 unified punch-in FX, all momentary by default with shift+pad latch.
+ * Row 4 (0-7):   Time/Repeat
+ * Row 3 (8-15):  Filter Sweeps (animated, phase-driven)
+ * Row 2 (16-23): Space Throws (tail decays on release)
+ * Row 1 (24-31): Distortion & Rhythm
  */
 
 #ifndef PERF_FX_DSP_H
@@ -18,16 +20,17 @@ static inline float pfx_clampf(float x, float lo, float hi) {
 #define PFX_SAMPLE_RATE     44100
 #define PFX_BLOCK_SIZE      128
 #define PFX_MAX_DELAY       (PFX_SAMPLE_RATE * 4)   /* 4 seconds */
-#define PFX_REPEAT_BUF      (PFX_SAMPLE_RATE * 4)   /* 4 seconds for beat repeat */
+#define PFX_REPEAT_BUF      (PFX_SAMPLE_RATE * 2)   /* 2 seconds per repeat slot */
+#define PFX_CAPTURE_BUF     (PFX_SAMPLE_RATE * 4)   /* 4 seconds shared capture */
+#define PFX_CHORUS_BUF      (PFX_SAMPLE_RATE * 1)   /* 1 second for chorus/flanger */
 #define PFX_REVERB_COMB_MAX 4096
 #define PFX_REVERB_AP_MAX   1024
-#define PFX_MAX_CONTINUOUS   3  /* max simultaneous continuous FX */
-#define PFX_NUM_PUNCH_IN    16
-#define PFX_NUM_CONTINUOUS  16
-#define PFX_NUM_PRESETS     16
+#define PFX_NUM_FX          32
 #define PFX_NUM_SCENES      16
-#define PFX_CONT_PARAMS     8  /* params per continuous FX */
-#define PFX_NUM_ALLPASS      6  /* phaser stages */
+#define PFX_NUM_PRESETS     16
+#define PFX_SLOT_PARAMS     4   /* params per FX slot (E1-E4) */
+#define PFX_NUM_GLOBALS     4   /* global params (E5-E8) */
+#define PFX_NUM_ALLPASS     6   /* phaser stages */
 
 /* ---- Pressure curve modes ---- */
 enum {
@@ -36,45 +39,54 @@ enum {
     PRESSURE_SWITCH
 };
 
-/* ---- Punch-in FX types (top 2 rows, pads 1-16) ---- */
+/* ---- Unified FX types (32 total) ---- */
 enum {
-    PUNCH_BEAT_REPEAT_4 = 0,
-    PUNCH_BEAT_REPEAT_8,
-    PUNCH_BEAT_REPEAT_16,
-    PUNCH_BEAT_REPEAT_TRIPLET,
-    PUNCH_STUTTER,
-    PUNCH_SCATTER,
-    PUNCH_REVERSE,
-    PUNCH_HALF_SPEED,
-    PUNCH_LP_FILTER,
-    PUNCH_HP_FILTER,
-    PUNCH_BP_FILTER,
-    PUNCH_RESONANT_PEAK,
-    PUNCH_BITCRUSH,
-    PUNCH_SAMPLE_RATE_REDUCE,
-    PUNCH_TAPE_STOP,
-    PUNCH_DUCKER
+    /* Row 4: Time/Repeat (pads 92-99 -> slots 0-7) */
+    FX_RPT_1_4 = 0,
+    FX_RPT_1_8,
+    FX_RPT_1_16,
+    FX_RPT_TRIP,
+    FX_STUTTER,
+    FX_SCATTER,
+    FX_REVERSE,
+    FX_HALF_SPEED,
+
+    /* Row 3: Filter Sweeps (pads 84-91 -> slots 8-15) */
+    FX_LP_SWEEP_DOWN,
+    FX_HP_SWEEP_UP,
+    FX_BP_RISE,
+    FX_BP_FALL,
+    FX_RESO_SWEEP,
+    FX_PHASER,
+    FX_FLANGER,
+    FX_AUTO_FILTER,
+
+    /* Row 2: Space Throws (pads 76-83 -> slots 16-23) */
+    FX_DELAY,
+    FX_PING_PONG,
+    FX_TAPE_ECHO,
+    FX_ECHO_FREEZE,
+    FX_REVERB,
+    FX_SHIMMER,
+    FX_DARK_VERB,
+    FX_SPRING,
+
+    /* Row 1: Distortion & Rhythm (pads 68-75 -> slots 24-31) */
+    FX_BITCRUSH,
+    FX_DOWNSAMPLE,
+    FX_TAPE_STOP,
+    FX_VINYL_BRAKE,
+    FX_SATURATE,
+    FX_GATE_DUCK,
+    FX_TREMOLO,
+    FX_CHORUS
 };
 
-/* ---- Continuous FX types (bottom 2 rows, pads 17-32) ---- */
-enum {
-    CONT_DELAY = 0,
-    CONT_PING_PONG,
-    CONT_TAPE_ECHO,
-    CONT_AUTO_FILTER,
-    CONT_PLATE_REVERB,
-    CONT_DARK_REVERB,
-    CONT_SPRING_REVERB,
-    CONT_SHIMMER_REVERB,
-    CONT_CHORUS,
-    CONT_PHASER,
-    CONT_FLANGER,
-    CONT_TREMOLO_PAN,
-    CONT_COMPRESSOR,
-    CONT_SATURATOR,
-    CONT_PITCH_SHIFT,
-    CONT_DUCKER
-};
+/* ---- FX category helpers ---- */
+#define FX_IS_REPEAT(s)  ((s) >= FX_RPT_1_4 && (s) <= FX_HALF_SPEED)
+#define FX_IS_FILTER(s)  ((s) >= FX_LP_SWEEP_DOWN && (s) <= FX_AUTO_FILTER)
+#define FX_IS_SPACE(s)   ((s) >= FX_DELAY && (s) <= FX_SPRING)
+#define FX_IS_DISTORT(s) ((s) >= FX_BITCRUSH && (s) <= FX_CHORUS)
 
 /* ---- State Variable Filter ---- */
 typedef struct {
@@ -107,7 +119,7 @@ typedef struct {
     int frames_captured;
 } repeat_t;
 
-/* ---- Tape stop ---- */
+/* ---- Tape stop / vinyl brake ---- */
 typedef struct {
     float *buf_l;
     float *buf_r;
@@ -139,7 +151,7 @@ typedef struct {
     float lfo_phase;
 } phaser_t;
 
-/* ---- Chorus / Flanger ---- */
+/* ---- Chorus / Flanger modulated delay ---- */
 typedef struct {
     float *buf_l;
     float *buf_r;
@@ -157,7 +169,9 @@ typedef struct {
     int   comb_pos_r[4];     /* separate read positions for right channel */
     float comb_filt_r[4];
     float ap_buf[2][PFX_REVERB_AP_MAX];
+    float ap_buf_r[2][PFX_REVERB_AP_MAX];  /* separate allpass buffers for R */
     int   ap_pos[2];
+    int   ap_pos_r[2];
     int   ap_len[2];
     /* Shimmer pitch shift state */
     float shimmer_buf[4096];
@@ -171,62 +185,71 @@ typedef struct {
 /* ---- Ducker ---- */
 typedef struct {
     float phase;     /* 0..1 within beat division */
-    int rate_div;    /* 0=1/4, 1=1/8, 2=1/16 */
+    float env;       /* smoothed gain */
 } ducker_t;
 
-/* ---- Punch-in FX slot ---- */
+/* ---- Unified FX slot ---- */
 typedef struct {
-    int active;
-    float pressure;
-    float velocity;
-    float intensity;   /* computed from velocity + pressure + curve */
+    int active;           /* 1 = currently processing */
+    int latched;          /* 1 = stays active after release */
+    int tail_active;      /* 1 = space FX tail still decaying */
+    float pressure;       /* 0..1 current pressure */
+    float velocity;       /* 0..1 note-on velocity */
+    float phase;          /* 0..1 animation phase (filter sweeps) */
+    float params[PFX_SLOT_PARAMS];  /* per-FX params (E1-E4) */
 
-    /* Shared state for various punch-in types */
+    /* Fade state for smooth transitions */
+    int fading_out;
+    int fade_pos;
+    int fade_len;
+
+    /* Tail silence counter for space FX */
+    int tail_silence_count;
+
+    /* Per-type DSP state — allocated/used based on slot type */
+    /* Repeat FX (slots 0-7) */
+    repeat_t repeat;
+    tape_stop_t tape;     /* also used for half-speed, tape stop, vinyl brake */
+
+    /* Filter FX (slots 8-15) */
     svf_t filter_l;
     svf_t filter_r;
-    repeat_t repeat;
-    tape_stop_t tape;
-    ducker_t ducker;
-    float crush_hold_l, crush_hold_r;
-    unsigned int crush_count;    /* sample rate reduce counter */
-    unsigned int scatter_seed;   /* separate RNG seed for scatter */
-
-    int fading_out;          /* 1 = crossfading to dry */
-    int fade_pos;            /* current position in fade */
-    int fade_len;            /* total fade length in samples */
-} punch_in_t;
-
-/* ---- Continuous FX slot ---- */
-typedef struct {
-    int active;
-    float params[PFX_CONT_PARAMS];
-
-    /* Effect-specific state */
-    delay_t delay;
-    reverb_t reverb;
     phaser_t phaser;
-    mod_delay_t mod_delay;
-    compressor_t comp;
-    float ducker_phase;    /* phase for continuous ducker */
-    svf_t filter_l;    /* for tone controls */
-    svf_t filter_r;
-} continuous_t;
+    mod_delay_t mod_delay; /* for flanger */
 
-/* ---- Scene snapshot ---- */
+    /* Space FX (slots 16-23) */
+    delay_t delay;
+    reverb_t *reverb;     /* heap allocated — only for reverb slots */
+    int echo_frozen;      /* echo freeze flag */
+
+    /* Distortion FX (slots 24-31) */
+    float crush_hold_l, crush_hold_r;
+    unsigned int crush_count;
+    unsigned int scatter_seed;
+    ducker_t ducker;
+    float trem_lfo_phase;    /* tremolo LFO */
+    /* Chorus uses mod_delay above */
+
+    /* Saturate tone filter */
+    svf_t sat_filter_l;
+    svf_t sat_filter_r;
+} pfx_slot_t;
+
+/* ---- Scene snapshot (simplified) ---- */
 typedef struct {
     int populated;
-    int cont_active[PFX_NUM_CONTINUOUS];
-    float cont_params[PFX_NUM_CONTINUOUS][PFX_CONT_PARAMS];
-    float global_params[8];  /* dry_wet, in_gain, lp, hp, eq_l, eq_m, eq_h, out_gain */
-} scene_t;
+    int latched[PFX_NUM_FX];
+    float params[PFX_NUM_FX][PFX_SLOT_PARAMS];
+    float globals[PFX_NUM_GLOBALS];
+} pfx_scene_t;
 
 /* ---- Step chain preset ---- */
 typedef struct {
     int populated;
-    int cont_active[PFX_NUM_CONTINUOUS];
-    float cont_params[PFX_NUM_CONTINUOUS][PFX_CONT_PARAMS];
-    float global_params[8];
-} step_preset_t;
+    int latched[PFX_NUM_FX];
+    float params[PFX_NUM_FX][PFX_SLOT_PARAMS];
+    float globals[PFX_NUM_GLOBALS];
+} pfx_step_preset_t;
 
 /* ---- Audio source modes ---- */
 enum {
@@ -236,74 +259,59 @@ enum {
 };
 #define PFX_TRACK_COUNT 4
 
-/* ---- Scene morph ---- */
-typedef struct {
-    int active;
-    int scene_a;
-    int scene_b;
-    float progress;          /* 0..1 (0 = scene_a, 1 = scene_b) */
-    float rate;              /* progress per sample (~2 sec) */
-} scene_morph_t;
+/* ---- Tail silence threshold ---- */
+#define PFX_TAIL_THRESHOLD  0.001f
+#define PFX_TAIL_SILENCE_FRAMES 1000
 
 /* ---- Main engine ---- */
 typedef struct {
-    /* Global parameters */
-    float dry_wet;       /* 0..1 */
-    float input_gain;    /* 0..2 */
-    float output_gain;   /* 0..2 */
-    float global_lp_cutoff;   /* 0..1 */
-    float global_hp_cutoff;   /* 0..1 */
-    float eq_low_gain;   /* -1..1 */
-    float eq_mid_gain;
-    float eq_high_gain;
+    /* Global parameters (E5-E8) */
+    float global_hpf;       /* 0..1, default 0 = off */
+    float global_lpf;       /* 0..1, default 1 = open */
+    float dry_wet;          /* 0..1, default 1 = full wet */
+    float eq_bump_freq;     /* 0..1, default 0.5 = centered */
 
     /* Global filters (stereo pairs) */
     svf_t global_lp_l, global_lp_r;
     svf_t global_hp_l, global_hp_r;
-    svf_t eq_low_l, eq_low_r;
-    svf_t eq_mid_l, eq_mid_r;
-    svf_t eq_high_l, eq_high_r;
+    svf_t eq_bump_l, eq_bump_r;
 
     /* Tempo */
     float bpm;
     int transport_running;
 
     /* Pressure curve */
-    int pressure_curve;   /* PRESSURE_LINEAR etc */
+    int pressure_curve;
 
     /* Audio source */
     int audio_source;
-    int track_mask;          /* bitmask: which tracks to mix (bits 0-3) */
+    int track_mask;
 
-    /* Per-track audio from Link Audio (set by plugin from shm) */
-    int16_t *track_audio[4]; /* pointers to per-track stereo interleaved data */
-    int track_audio_valid;   /* set each block if track data available */
+    /* Per-track audio from Link Audio */
+    int16_t *track_audio[4];
+    int track_audio_valid;
 
     /* Bypass */
     int bypassed;
 
-    /* Punch-in FX */
-    punch_in_t punch[PFX_NUM_PUNCH_IN];
+    /* 32 unified FX slots */
+    pfx_slot_t slots[PFX_NUM_FX];
 
-    /* Continuous FX */
-    continuous_t cont[PFX_NUM_CONTINUOUS];
-    int active_cont_slots[PFX_MAX_CONTINUOUS]; /* indices of active continuous FX */
-    int active_cont_count;
-    int cont_activation_order[PFX_NUM_CONTINUOUS]; /* activation sequence number per slot */
-    int cont_activation_counter;                    /* monotonic counter */
+    /* Last touched slot for E1-E4 mapping */
+    int last_touched_slot;
 
-    /* Scenes and presets */
-    scene_t scenes[PFX_NUM_SCENES];
-    step_preset_t step_presets[PFX_NUM_PRESETS];
-    int current_step_preset;  /* -1 = none */
+    /* Scenes and step presets */
+    pfx_scene_t scenes[PFX_NUM_SCENES];
+    pfx_step_preset_t step_presets[PFX_NUM_PRESETS];
+    int current_step_preset;
 
     /* Step FX sequencer */
     int step_seq_active;
     int step_seq_pos;
     float step_seq_phase;
-    int step_seq_division;  /* 0=1/4, 1=1/8, 2=1/16, 3=1bar */
+    int step_seq_division;
 
-    /* Capture buffer for beat repeat / reverse / half-speed */
+    /* Shared capture buffer for repeat/reverse/half-speed/scatter */
     float *capture_buf_l;
     float *capture_buf_r;
     int capture_len;
@@ -315,13 +323,13 @@ typedef struct {
     float dry_l[PFX_BLOCK_SIZE];
     float dry_r[PFX_BLOCK_SIZE];
 
-    /* Scene morph */
-    scene_morph_t morph;
-
     /* Host audio pointers (set from mapped_memory) */
     uint8_t *mapped_memory;
     int audio_out_offset;
     int audio_in_offset;
+
+    /* Direct input: if non-NULL, render reads from this instead of mapped_memory */
+    int16_t *direct_input;
 } perf_fx_engine_t;
 
 /* ---- API ---- */
@@ -332,16 +340,12 @@ void pfx_engine_reset(perf_fx_engine_t *e);
 /* Process one block (128 frames). Reads from host audio, writes to out_lr */
 void pfx_engine_render(perf_fx_engine_t *e, int16_t *out_lr, int frames);
 
-/* Punch-in FX control */
-void pfx_punch_activate(perf_fx_engine_t *e, int slot, float velocity);
-void pfx_punch_deactivate(perf_fx_engine_t *e, int slot);
-void pfx_punch_set_pressure(perf_fx_engine_t *e, int slot, float pressure);
-
-/* Continuous FX control */
-void pfx_cont_toggle(perf_fx_engine_t *e, int slot);
-void pfx_cont_activate(perf_fx_engine_t *e, int slot);
-void pfx_cont_deactivate(perf_fx_engine_t *e, int slot);
-void pfx_cont_set_param(perf_fx_engine_t *e, int slot, int param_idx, float value);
+/* Unified FX control */
+void pfx_activate(perf_fx_engine_t *e, int slot, float velocity);
+void pfx_deactivate(perf_fx_engine_t *e, int slot);
+void pfx_set_pressure(perf_fx_engine_t *e, int slot, float pressure);
+void pfx_set_param(perf_fx_engine_t *e, int slot, int idx, float val);
+void pfx_set_latched(perf_fx_engine_t *e, int slot, int latched);
 
 /* Scene management */
 void pfx_scene_save(perf_fx_engine_t *e, int slot);
@@ -352,10 +356,6 @@ void pfx_scene_clear(perf_fx_engine_t *e, int slot);
 void pfx_step_save(perf_fx_engine_t *e, int slot);
 void pfx_step_recall(perf_fx_engine_t *e, int slot);
 void pfx_step_clear(perf_fx_engine_t *e, int slot);
-
-/* Scene morphing */
-void pfx_scene_morph_start(perf_fx_engine_t *e, int scene_a, int scene_b);
-void pfx_scene_morph_tick(perf_fx_engine_t *e, int frames);
 
 /* State serialization */
 int pfx_serialize_state(perf_fx_engine_t *e, char *buf, int buf_len);
