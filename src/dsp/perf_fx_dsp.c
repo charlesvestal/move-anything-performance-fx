@@ -543,9 +543,7 @@ void pfx_cont_activate(perf_fx_engine_t *e, int slot) {
     if (c->mod_delay.buf_l) memset(c->mod_delay.buf_l, 0, c->mod_delay.buf_len * sizeof(float));
     if (c->mod_delay.buf_r) memset(c->mod_delay.buf_r, 0, c->mod_delay.buf_len * sizeof(float));
     c->comp.env = 0.0f;
-    c->freeze.captured = 0;
-    c->freeze.read_pos = 0.0f;
-    c->ring.phase = 0.0f;
+    c->ducker_phase = 0.0f;
     svf_reset(&c->filter_l);
     svf_reset(&c->filter_r);
 
@@ -1516,13 +1514,13 @@ static void process_cont_ducker(continuous_t *c, float *l, float *r,
     float samples_per_beat = (60.0f / e->bpm) * PFX_SAMPLE_RATE * div;
     float phase_inc = 1.0f / samples_per_beat;
 
-    /* Advance phase — reuse ring.phase field */
-    c->ring.phase += phase_inc;
-    if (c->ring.phase >= 1.0f) {
-        c->ring.phase -= 1.0f;
+    /* Advance ducker phase */
+    c->ducker_phase += phase_inc;
+    if (c->ducker_phase >= 1.0f) {
+        c->ducker_phase -= 1.0f;
     }
 
-    float phase = c->ring.phase;
+    float phase = c->ducker_phase;
     /* Apply swing to second half */
     if (phase > 0.5f) {
         phase = 0.5f + (phase - 0.5f) * (1.0f - swing) / (1.0f - swing * 0.5f);

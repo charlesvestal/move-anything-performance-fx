@@ -21,7 +21,6 @@ static inline float pfx_clampf(float x, float lo, float hi) {
 #define PFX_REPEAT_BUF      (PFX_SAMPLE_RATE * 4)   /* 4 seconds for beat repeat */
 #define PFX_REVERB_COMB_MAX 4096
 #define PFX_REVERB_AP_MAX   1024
-#define PFX_FREEZE_GRAIN    4096
 #define PFX_MAX_CONTINUOUS   3  /* max simultaneous continuous FX */
 #define PFX_NUM_PUNCH_IN    16
 #define PFX_NUM_CONTINUOUS  16
@@ -169,23 +168,6 @@ typedef struct {
     float mix;
 } reverb_t;
 
-/* ---- Freeze (granular hold) ---- */
-typedef struct {
-    float buf_l[PFX_FREEZE_GRAIN];
-    float buf_r[PFX_FREEZE_GRAIN];
-    int grain_len;
-    float read_pos;
-    float pitch_shift; /* 1.0 = normal */
-    int captured;
-    float env;         /* crossfade envelope */
-} freeze_t;
-
-/* ---- Ring Modulator ---- */
-typedef struct {
-    float phase;
-    float freq;
-} ring_mod_t;
-
 /* ---- Ducker ---- */
 typedef struct {
     float phase;     /* 0..1 within beat division */
@@ -225,8 +207,7 @@ typedef struct {
     phaser_t phaser;
     mod_delay_t mod_delay;
     compressor_t comp;
-    freeze_t freeze;
-    ring_mod_t ring;
+    float ducker_phase;    /* phase for continuous ducker */
     svf_t filter_l;    /* for tone controls */
     svf_t filter_r;
 } continuous_t;
