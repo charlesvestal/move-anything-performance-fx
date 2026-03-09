@@ -430,9 +430,11 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
             s->repeat.capturing = 1;  /* Set LAST so render sees valid state */
         }
 
-        /* Scatter */
+        /* Scatter: reset step counter and trigger first slice */
         if (slot == FX_SCATTER) {
-            s->scatter_seed = (unsigned int)(velocity * 12345.0f + 67890u);
+            s->repeat.write_pos = -1;   /* step counter, will advance to 0 */
+            s->repeat.repeat_pos = 0;   /* triggers slice setup on first call */
+            s->repeat.frames_captured = 0;
         }
 
         /* Reverse: copy from capture buffer */
@@ -802,32 +804,109 @@ static void process_stutter(pfx_slot_t *s, float *l, float *r,
     }
 }
 
+/*
+ * Scatter: tempo-synced slice rearrangement (SP-404 style).
+ *
+ * Fixed 8-step pattern of slice indices: [0,1,2,1,4,3,6,5]
+ * Slices are 1/16th note, read from capture buffer.
+ *
+ * Pressure (0.0–1.0) continuously modulates:
+ *   Gate ratio:     1.0 at p=0  →  0.4 at p=1 (rest of slice silent)
+ *   Reverse weight: 0.0 at p=0  →  0.5 at p=1 (deterministic per step)
+ *
+ * 64-sample crossfade at every slice boundary.
+ */
+
+#define SCATTER_STEPS 8
+static const int scatter_pattern[SCATTER_STEPS] = { 0, 1, 2, 1, 4, 3, 6, 5 };
+
+/* Deterministic reverse decision per step index.
+ * Returns 1 if this step should be reversed at the given reverse weight.
+ * Uses a fixed threshold table so behavior is stable while pressure holds. */
+static inline int scatter_is_reversed(int step, float rev_weight) {
+    /* Per-step thresholds: step must exceed this to reverse */
+    static const float rev_thresh[SCATTER_STEPS] = {
+        0.45f, 0.30f, 0.50f, 0.20f, 0.40f, 0.35f, 0.25f, 0.48f
+    };
+    return rev_weight > rev_thresh[step];
+}
+
 static void process_scatter(pfx_slot_t *s, float *l, float *r,
                              perf_fx_engine_t *e) {
     repeat_t *rp = &s->repeat;
-    float pressure = s->pressure;
 
+    /* Slice length = 1/16th note */
+    int slice_len = pfx_bpm_to_samples(e->bpm, 0.25f);
+    if (slice_len < 128) slice_len = 128;
+    if (slice_len > e->capture_len / SCATTER_STEPS)
+        slice_len = e->capture_len / SCATTER_STEPS;
+
+    /* Pressure-driven parameters (continuous) */
+    float p = s->pressure;
+    float gate_ratio = 1.0f - p * 0.6f;        /* 1.0 → 0.4 */
+    float rev_weight = p * 0.5f;                /* 0.0 → 0.5 */
+    int gate_len = (int)(slice_len * gate_ratio);
+    if (gate_len < 64) gate_len = 64;
+
+    /* Slice boundary — set up next slice */
     if (rp->repeat_pos <= 0) {
-        int min_len = 128;
-        int max_len = pfx_bpm_to_samples(e->bpm, 0.5f);
-        if (max_len > e->capture_len) max_len = e->capture_len;
-        int slice_len = min_len + (int)(white_noise(&s->scatter_seed) * 0.5f + 0.5f) * (max_len - min_len);
-        slice_len = (int)(slice_len * (1.0f - pressure * 0.7f));
-        if (slice_len < min_len) slice_len = min_len;
+        int step = (rp->write_pos + 1) % SCATTER_STEPS;
+        rp->write_pos = step;
 
-        rp->repeat_len = slice_len;
-        rp->repeat_pos = slice_len;
-        int offset = (int)((white_noise(&s->scatter_seed) * 0.5f + 0.5f) * e->capture_len);
-        rp->read_pos = (e->capture_write_pos - offset + e->capture_len) % e->capture_len;
+        /* Look up which slice index to play from the pattern */
+        int slice_idx = scatter_pattern[step];
+
+        /* Base: the most recent 8 slices in the capture buffer */
+        int bar_start = (e->capture_write_pos - SCATTER_STEPS * slice_len
+                        + e->capture_len) % e->capture_len;
+        int slice_start = (bar_start + slice_idx * slice_len) % e->capture_len;
+
+        /* Determine direction */
+        int reversed = scatter_is_reversed(step, rev_weight);
+
+        rp->repeat_pos = slice_len;     /* total time for this step */
+        rp->repeat_len = gate_len;      /* audible portion */
+        rp->frames_captured = 0;        /* samples consumed */
+        rp->capturing = reversed;       /* 0=fwd, 1=rev */
+
+        if (reversed)
+            rp->read_pos = (slice_start + slice_len - 1) % e->capture_len;
+        else
+            rp->read_pos = slice_start;
+
+        /* Crossfade at slice boundary */
+        rp->xfade_pos = 0;
+        rp->xfade_len = 64;
     }
 
-    *l = e->capture_buf_l[rp->read_pos];
-    *r = e->capture_buf_r[rp->read_pos];
+    if (rp->frames_captured < rp->repeat_len) {
+        /* Audible portion — read from capture buffer */
+        float samp_l = e->capture_buf_l[rp->read_pos];
+        float samp_r = e->capture_buf_r[rp->read_pos];
 
-    if ((rp->repeat_len & 3) == 0)
-        rp->read_pos = (rp->read_pos - 1 + e->capture_len) % e->capture_len;
-    else
-        rp->read_pos = (rp->read_pos + 1) % e->capture_len;
+        /* Crossfade at slice start */
+        if (rp->xfade_pos < rp->xfade_len) {
+            float t = (float)rp->xfade_pos / (float)rp->xfade_len;
+            *l = *l * (1.0f - t) + samp_l * t;
+            *r = *r * (1.0f - t) + samp_r * t;
+            rp->xfade_pos++;
+        } else {
+            *l = samp_l;
+            *r = samp_r;
+        }
+
+        /* Advance read position */
+        if (rp->capturing)
+            rp->read_pos = (rp->read_pos - 1 + e->capture_len) % e->capture_len;
+        else
+            rp->read_pos = (rp->read_pos + 1) % e->capture_len;
+    } else {
+        /* Silent gate portion */
+        *l = 0.0f;
+        *r = 0.0f;
+    }
+
+    rp->frames_captured++;
     rp->repeat_pos--;
 }
 
