@@ -3,8 +3,9 @@
  *
  * 32 unified punch-in FX pads (hold=on, release=off)
  * Shift+hold = latch, Shift+hold latched = unlatch
- * Last-touched pad gets E1-E4, E5-E8 always global
- * Step sequencer, scene presets, per-set persistence
+ * E1: RPT Length  E2: RPT Speed  E3: RPT on/off
+ * E4-E6: per-slot FX params (last touched pad)
+ * E7: Tilt EQ  E8: DJ Filter
  */
 
 import {
@@ -76,57 +77,58 @@ const FX_NAMES = [
     'LP SWP\u2193', 'HP SWP\u2191', 'BP RISE', 'BP FALL',
     'RESO SW', 'PHASER', 'FLANGER', 'AUTOFLT',
     /* Row 2: Space Throws */
-    'DELAY', 'PING', 'TAPE ECH', 'ECH FRZ',
-    'REVERB', 'SHIMMER', 'DK VERB', 'SPRING',
+    'DLY 1/4', 'DLY D8', 'PP 1/4', 'PP D8',
+    'ROOM', 'HALL', 'DK VERB', 'SPRING',
     /* Row 1: Distortion/Rhythm */
-    'CRUSH', 'DWNSMPL', 'TAPE STP', 'VNL BRK',
-    'SATURATE', 'GATE', 'TREMOLO', 'CHORUS'
+    'CRUSH', 'DWNSMPL', 'SATURATE', 'GATE',
+    'TREMOLO', 'OCT DN', 'VINYL', 'VNL BRK'
 ];
 
-/* Per-FX E1-E4 param labels */
-const FX_PARAM_LABELS = [
-    /* Row 4: repeats/time */
-    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT 1/4 */
-    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT 1/8 */
-    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT 1/16 */
-    ['Div Fine', 'Decay', 'Filter', 'Gate'],       /* RPT TRP */
-    ['Grain', 'Div', 'Decay', 'Filter'],           /* STUTTER */
-    ['Grain', 'Div', 'Decay', 'Filter'],           /* SCATTER */
-    ['Length', 'Fade', 'Filter', '\u2014'],         /* REVERSE */
-    ['Speed', 'Fade', 'Filter', '\u2014'],         /* STRETCH */
-    /* Row 3: filter sweeps */
-    ['Speed', 'Range', 'Reso', 'Start'],           /* LP SWP */
-    ['Speed', 'Range', 'Reso', 'Start'],           /* HP SWP */
-    ['Speed', 'Range', 'Reso', 'Start'],           /* BP RISE */
-    ['Speed', 'Range', 'Reso', 'Start'],           /* BP FALL */
-    ['Speed', 'Range', 'Reso', 'Start'],           /* RESO SW */
-    ['Speed', 'Depth', 'Feedbk', 'Stages'],       /* PHASER */
-    ['Speed', 'Depth', 'Feedbk', 'Manual'],        /* FLANGER */
-    ['Speed', 'Depth', 'Reso', 'Shape'],           /* AUTOFLT */
-    /* Row 2: space throws */
-    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* DELAY */
-    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* PING */
-    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* TAPE ECH */
-    ['Time', 'Feedbk', 'Filter', '\u2014'],        /* ECH FRZ */
-    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* REVERB */
-    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* SHIMMER */
-    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* DK VERB */
-    ['Decay', 'Damp', 'PreDly', '\u2014'],         /* SPRING */
-    /* Row 1: distortion/rhythm */
-    ['Bits', '\u2014', '\u2014', '\u2014'],         /* CRUSH */
-    ['Rate', '\u2014', '\u2014', '\u2014'],         /* DWNSMPL */
-    ['Speed', 'Wow', '\u2014', '\u2014'],           /* TAPE STP */
-    ['Speed', 'Noise', '\u2014', '\u2014'],         /* VNL BRK */
-    ['Drive', 'Tone', 'Curve', '\u2014'],           /* SATURATE */
-    ['Thresh', 'Attack', 'Release', '\u2014'],      /* GATE */
-    ['Speed', 'Depth', 'Shape', '\u2014'],          /* TREMOLO */
-    ['Rate', 'Depth', 'Feedbk', '\u2014']           /* CHORUS */
+/* Per-slot param names (E1-E3, indexed by slot) */
+const SLOT_PARAM_NAMES = [
+    /* Row 4: Time/Repeat (Speed is on E5 global) */
+    ['Filter', 'Gate',   '---'],
+    ['Filter', 'Gate',   '---'],
+    ['Filter', 'Gate',   '---'],
+    ['Filter', 'Gate',   '---'],
+    ['Filter', 'Gate',   '---'],
+    ['Pattern','Gate',   'Revrse'],
+    ['Feedbk', 'Filter', 'Mix'],
+    ['Tone',   'WowFlt', 'Mix'],
+    /* Row 3: Filter Sweeps */
+    ['Speed',  'Reso',   'Depth'],
+    ['Speed',  'Reso',   'Depth'],
+    ['Speed',  'Reso',   'Width'],
+    ['Speed',  'Reso',   'Width'],
+    ['Speed',  'Reso',   'Mix'],
+    ['Depth',  'Feedbk', 'Mix'],
+    ['Depth',  'Feedbk', 'Mix'],
+    ['Depth',  'Center', 'Reso'],
+    /* Row 2: Space Throws */
+    ['Feedbk', 'Tone',   'Level'],
+    ['Feedbk', 'Tone',   'Level'],
+    ['Feedbk', 'Tone',   'Level'],
+    ['Feedbk', 'Tone',   'Level'],
+    ['Time',   'Tone',   'Level'],
+    ['Time',   'Tone',   'Level'],
+    ['Time',   'Dark',   'Level'],
+    ['Time',   'Tone',   'Level'],
+    /* Row 1: Distortion & Rhythm */
+    ['Filter', 'Tone',   'Mix'],
+    ['Filter', 'Tone',   'Mix'],
+    ['Drive',  'Tone',   'Mix'],
+    ['Speed',  'Shape',  'Depth'],
+    ['Rate',   'Depth',  'Wave'],
+    ['Tone',   'WowFlt', 'Mix'],
+    ['Noise',  'WowFlt', 'Tone'],
+    ['Speed',  'Tone',   'Mix']
 ];
 
-/* Global param labels (E5-E8) */
-const GLOBAL_LABELS = ['HPF', 'LPF', 'D/W', 'Bump'];
-const GLOBAL_PARAMS = ['global_hpf', 'global_lpf', 'dry_wet', 'eq_bump'];
-const GLOBAL_DEFAULTS = [0.0, 1.0, 1.0, 0.5];
+/* Global param labels (E4-E8) */
+const GLOBAL_LABELS = ['Length', 'Speed', 'Loop', 'Tilt', 'DJ Flt'];
+const GLOBAL_KEYS = ['repeat_rate', 'repeat_speed', 'rpt_toggle', 'tilt_eq', 'dj_filter'];
+const GLOBAL_DEFAULTS = [0.5, 0.5, 0.0, 0.5, 0.5];
+const NUM_GLOBALS = 5;
 
 /* LED color mapping per slot */
 const BRIGHT_COLORS = [];
@@ -147,15 +149,21 @@ for (let i = 0; i < 8; i++) {
     BRIGHT_COLORS.push(ElectricViolet);
     DIM_COLORS.push(Violet);
 }
-/* Row 1 (slots 24-31): Pink for 24-28, Green for 29-31 */
-for (let i = 24; i < 32; i++) {
-    if (i <= 28) {
-        BRIGHT_COLORS.push(BrightPink);
-        DIM_COLORS.push(Rose);
-    } else {
-        BRIGHT_COLORS.push(BrightGreen);
-        DIM_COLORS.push(ForestGreen);
-    }
+/* Row 1 (slots 24-31): grouped by function */
+/* Crush/Downsample/Saturate (24-26): Pink */
+for (let i = 0; i < 3; i++) {
+    BRIGHT_COLORS.push(BrightPink);
+    DIM_COLORS.push(Rose);
+}
+/* Gate/Tremolo (27-28): Green */
+for (let i = 0; i < 2; i++) {
+    BRIGHT_COLORS.push(BrightGreen);
+    DIM_COLORS.push(ForestGreen);
+}
+/* Pitch Down/Vinyl Sim/Vinyl Brake (29-31): Yellow */
+for (let i = 0; i < 3; i++) {
+    BRIGHT_COLORS.push(VividYellow);
+    DIM_COLORS.push(Mustard);
 }
 
 /* Persistence paths */
@@ -173,32 +181,24 @@ let undoWasBypassed = false;
 /* FX state */
 let fxActive = new Array(NUM_SLOTS).fill(false);
 let fxLatched = new Array(NUM_SLOTS).fill(false);
-let lastTouched = -1;  /* slot index with E1-E4 focus */
-
-/* Per-slot E1-E4 param values (0.0-1.0) */
+let fxHeld = new Array(NUM_SLOTS).fill(false); /* physically held (finger on pad) */
+/* Per-slot param values (3 per slot, 0.0-1.0)
+ * Repeat slots (0-7): filter=center, gate=off, unused
+ * All others: 0.5 matches pre-knob behavior */
 let slotParams = [];
 for (let i = 0; i < NUM_SLOTS; i++) {
-    slotParams.push([0.5, 0.5, 0.5, 0.5]);
+    if (i < 8) slotParams.push([0.5, 0.0, 0.5]);  /* repeat: gate off */
+    else slotParams.push([0.5, 0.5, 0.5]);          /* others: neutral */
 }
-
+/* Last touched slot for E1-E3 mapping */
+let lastTouchedSlot = -1;
+/* Last repeat slot used (for step button toggle) */
+let lastRepeatSlot = 0; /* default to RPT 1/4 (slot 0) */
 /* Global param values (0.0-1.0) */
 let globalValues = GLOBAL_DEFAULTS.slice();
 
 /* Track routing */
 let trackRouted = [false, false, false, false];
-
-/* Step presets (scenes on step buttons) */
-let stepPopulated = new Array(16).fill(false);
-let currentStep = -1;
-
-/* Step FX sequencer */
-let stepSeqActive = false;
-let stepRecordMode = false;
-let stepSeqDivision = 0;
-let transportRunning = false;
-
-/* Recording */
-let isRecording = false;
 
 /* Display overlay */
 let overlayText = '';
@@ -206,6 +206,10 @@ let overlayParam = '';
 let overlayValue = '';
 let overlayTimer = 0;
 const OVERLAY_DURATION = 66;
+
+/* Throttle screen reader announce to prevent D-Bus flood on rapid knob turns */
+let lastAnnounceTime = 0;
+const ANNOUNCE_THROTTLE_MS = 150;
 
 /* LED init */
 let ledInitPending = true;
@@ -218,7 +222,7 @@ const TAP_TIMEOUT = 2000;
 const TAP_MIN_TAPS = 2;
 
 /* Audio source */
-let audioSource = 1; /* 0=LINE_IN, 1=MOVE_MIX, 2=TRACKS */
+let audioSource = 1; /* Always Move Mix */
 
 /* Persistence */
 let autosaveCounter = 0;
@@ -239,17 +243,13 @@ function getStatePath() {
 
 function saveState() {
     const state = {
-        version: 2,
+        version: 8,
         fxLatched: fxLatched,
         slotParams: slotParams,
         globalValues: globalValues,
-        lastTouched: lastTouched,
-        stepPopulated: stepPopulated,
-        currentStep: currentStep,
-        audioSource: audioSource,
-        trackRouted: trackRouted,
-        bpm: bpm,
-        stepSeqDivision: stepSeqDivision
+        lastTouchedSlot: lastTouchedSlot,
+        lastRepeatSlot: lastRepeatSlot,
+        bpm: bpm
     };
 
     const dspState = getParam('state');
@@ -277,36 +277,45 @@ function loadState() {
 
         const fullState = JSON.parse(raw);
         const state = fullState.ui;
-        if (!state || state.version !== 2) return false;
+        if (!state || ![2, 3, 4, 5, 6, 7, 8].includes(state.version)) return false;
 
         if (state.fxLatched) fxLatched = state.fxLatched;
-        if (state.slotParams) slotParams = state.slotParams;
-        if (state.globalValues) globalValues = state.globalValues;
-        if (state.lastTouched !== undefined) lastTouched = state.lastTouched;
-        if (state.stepPopulated) stepPopulated = state.stepPopulated;
-        if (state.currentStep !== undefined) currentStep = state.currentStep;
-        if (state.audioSource !== undefined) audioSource = state.audioSource;
-        if (state.trackRouted) trackRouted = state.trackRouted;
+        if (state.version >= 8) {
+            /* v8: gate defaults to 0, speed detent */
+            if (state.globalValues && state.globalValues.length >= NUM_GLOBALS) {
+                globalValues = state.globalValues.slice(0, NUM_GLOBALS);
+            }
+            if (state.slotParams && state.slotParams.length >= NUM_SLOTS) {
+                slotParams = state.slotParams;
+            }
+            if (state.lastTouchedSlot !== undefined) {
+                lastTouchedSlot = state.lastTouchedSlot;
+            }
+            if (state.lastRepeatSlot !== undefined) {
+                lastRepeatSlot = state.lastRepeatSlot;
+            }
+        } else {
+            /* v2-v7: old rate system, old defaults, or old gate defaults — reset */
+            globalValues = GLOBAL_DEFAULTS.slice();
+        }
+        /* audioSource always 1 (Move Mix), trackRouted unused */
         if (state.bpm !== undefined) bpm = state.bpm;
-        if (state.stepSeqDivision !== undefined) stepSeqDivision = state.stepSeqDivision;
 
         /* Push restored state to DSP */
         sendParam('bpm', String(bpm));
-        sendParam('audio_source', String(audioSource));
-        sendParam('step_seq_division', String(stepSeqDivision));
+        sendParam('audio_source', '1'); /* Always Move Mix */
 
-        /* Restore track routing */
-        if (state.trackRouted) {
-            let mask = 0;
-            for (let i = 0; i < 4; i++) {
-                if (trackRouted[i]) mask |= (1 << i);
-            }
-            sendParam('track_mask', String(mask));
+        /* Restore global params (skip rpt_toggle which is UI-only) */
+        for (let i = 0; i < NUM_GLOBALS; i++) {
+            if (GLOBAL_KEYS[i] === 'rpt_toggle') continue;
+            sendParam(GLOBAL_KEYS[i], globalValues[i].toFixed(3));
         }
 
-        /* Restore global params */
-        for (let i = 0; i < 4; i++) {
-            sendParam(GLOBAL_PARAMS[i], globalValues[i].toFixed(3));
+        /* Restore per-slot params */
+        for (let i = 0; i < NUM_SLOTS; i++) {
+            for (let j = 0; j < 3; j++) {
+                sendParam(`punch_${i}_param_${j}`, slotParams[i][j].toFixed(3));
+            }
         }
 
         /* Restore latched FX */
@@ -315,10 +324,6 @@ function loadState() {
                 sendParam(`punch_${i}_on`, '0.700');
                 sendParam(`punch_${i}_latch`, '1');
                 fxActive[i] = true;
-                /* Restore per-slot params */
-                for (let j = 0; j < 4; j++) {
-                    sendParam(`punch_${i}_param_${j}`, slotParams[i][j].toFixed(3));
-                }
             }
         }
 
@@ -384,11 +389,8 @@ function handleTapTempo() {
  * ================================================================ */
 
 function getPadColor(slot) {
-    if (lastTouched === slot && (fxActive[slot] || fxLatched[slot])) {
-        return White;
-    }
     if (fxLatched[slot]) {
-        return Pulse4th;  /* bright color with pulse animation */
+        return BrightRed;
     }
     if (fxActive[slot]) {
         return BRIGHT_COLORS[slot];
@@ -407,12 +409,9 @@ function buildLedList() {
         });
     }
 
-    /* Step buttons */
+    /* Step buttons (unused — all off) */
     for (let i = 0; i < 16; i++) {
-        let color = Black;
-        if (stepPopulated[i]) color = LightGrey;
-        if (currentStep === i) color = White;
-        leds.push({ note: MoveSteps[i], color });
+        leds.push({ note: MoveSteps[i], color: Black });
     }
 
     return leds;
@@ -432,18 +431,12 @@ function setupLedBatch() {
         ledInitPending = false;
         /* Button LEDs */
         setButtonLED(MoveUndo, bypassed ? WhiteLedBright : WhiteLedDim);
-        setButtonLED(MoveLoop, stepSeqActive ? WhiteLedBright : WhiteLedDim);
-        setButtonLED(MoveCapture, isRecording ? WhiteLedBright : WhiteLedDim);
         setButtonLED(MoveBack, WhiteLedDim);
         setButtonLED(MoveShift, WhiteLedDim);
-        setButtonLED(MoveCopy, WhiteLedDim);
-        setButtonLED(MoveDelete, WhiteLedDim);
-        setButtonLED(MoveRec, stepRecordMode ? WhiteLedBright : WhiteLedDim);
-        setButtonLED(MovePlay, transportRunning ? WhiteLedBright : WhiteLedDim);
 
         /* Track button LEDs */
         for (let i = 0; i < 4; i++) {
-            setButtonLED(TRACK_CCS[i], trackRouted[i] ? WhiteLedBright : WhiteLedDim);
+            setButtonLED(TRACK_CCS[i], WhiteLedDim);
         }
     }
 }
@@ -468,23 +461,11 @@ function drawMainView() {
     clear_screen();
 
     /* Line 1: header */
-    const sourceLabels = ['IN', 'MIX', 'TRK'];
-    const sourceLabel = sourceLabels[audioSource] || 'MIX';
-    let trackInfo = '';
-    if (audioSource === 2) {
-        let tracks = [];
-        for (let i = 0; i < 4; i++) {
-            if (trackRouted[i]) tracks.push(i + 1);
-        }
-        trackInfo = tracks.length > 0 ? ` ${tracks.join('')}` : '';
-    }
-
-    /* Count active FX */
     let activeCount = 0;
     for (let i = 0; i < NUM_SLOTS; i++) {
         if (fxActive[i]) activeCount++;
     }
-    print(0, 0, `PFX ${bpm.toFixed(0)} ${sourceLabel}${trackInfo} [${activeCount}]`, 1);
+    print(0, 0, `PFX ${bpm.toFixed(0)} [${activeCount}]`, 1);
     draw_line(0, 9, SCREEN_W, 9, 1);
 
     /* Lines 2-3: names of active/latched FX */
@@ -518,32 +499,30 @@ function drawMainView() {
     /* Separator */
     draw_line(0, 30, SCREEN_W, 30, 1);
 
-    /* Line 4: E1-E4 labels from lastTouched pad */
-    if (lastTouched >= 0 && (fxActive[lastTouched] || fxLatched[lastTouched])) {
-        const labels = FX_PARAM_LABELS[lastTouched];
-        const name = FX_NAMES[lastTouched];
-        /* Truncate name to fit */
-        const shortName = name.length > 8 ? name.substring(0, 7) + '~' : name;
-        print(0, 33, shortName, 1);
-        for (let i = 0; i < 4; i++) {
-            const lbl = labels[i].substring(0, 5);
-            print(50 + i * 20, 33, lbl, 1);
-        }
+    /* Line 4: E1-E3 (RPT controls) + E4 (per-slot param 1) */
+    const timeLabel = getTimeLabel(globalValues[0]);
+    print(0, 33, timeLabel, 1);     /* E1: RPT Length */
+    const spd = globalValues[1];
+    print(32, 33, spd < 0.48 ? 'Slow' : spd > 0.52 ? 'Fast' : 'Nrml', 1); /* E2: Speed */
+    const rptOn = fxActive[lastRepeatSlot] || fxLatched[lastRepeatSlot];
+    print(64, 33, rptOn ? 'LP*' : 'Loop', 1);  /* E3: Loop SW */
+    /* E4: first per-slot param */
+    if (lastTouchedSlot >= 0 && lastTouchedSlot < NUM_SLOTS) {
+        print(96, 33, SLOT_PARAM_NAMES[lastTouchedSlot][0], 1);
     } else {
-        print(0, 33, 'Touch a pad', 1);
+        print(96, 33, '---', 1);
     }
 
-    /* Line 5: E5-E8 labels always */
-    for (let i = 0; i < 4; i++) {
-        print(i * 32, 44, GLOBAL_LABELS[i], 1);
+    /* Line 5: E5-E8 labels */
+    if (lastTouchedSlot >= 0 && lastTouchedSlot < NUM_SLOTS) {
+        print(0, 44, SLOT_PARAM_NAMES[lastTouchedSlot][1], 1);  /* E5 */
+        print(32, 44, SLOT_PARAM_NAMES[lastTouchedSlot][2], 1); /* E6 */
+    } else {
+        print(0, 44, '---', 1);
+        print(32, 44, '---', 1);
     }
-
-    /* Step seq / record mode indicators */
-    if (stepRecordMode) {
-        print(105, 0, 'REC', 1);
-    } else if (stepSeqActive) {
-        print(105, 0, 'SEQ', 1);
-    }
+    print(64, 44, 'Tilt', 1);       /* E7: Tilt EQ */
+    print(96, 44, 'DJ', 1);         /* E8: DJ Filter */
 
     /* Bypass overlay */
     if (bypassed) {
@@ -576,6 +555,40 @@ function drawOverlay() {
     }
 
     overlayTimer--;
+}
+
+/* ================================================================
+ * Rate label helper (maps 0..1 to musical division name)
+ * ================================================================ */
+
+function resetRepeatKnobs(slot) {
+    /* Reset filter to center (bypass), gate to off, speed to normal */
+    slotParams[slot][0] = 0.5;  /* filter = center */
+    slotParams[slot][1] = 0.0;  /* gate = off */
+    sendParam(`punch_${slot}_param_0`, '0.500');
+    sendParam(`punch_${slot}_param_1`, '0.000');
+    globalValues[1] = 0.5;      /* speed = normal */
+    sendParam('repeat_speed', '0.500');
+}
+
+function bpmSyncedRate(slot) {
+    /* Convert BPM-synced beat division to rate01 position (free seconds).
+     * Matches DSP: seconds = 2.0 * 0.006^rate01
+     * Inverse: rate01 = ln(seconds/2.0) / ln(0.006) */
+    const beatSec = 60.0 / (bpm > 20 ? bpm : 120);
+    const divMap = [1.0, 0.5, 0.25, 2.0/3.0, 0.125]; /* 1/4, 1/8, 1/16, trip, 1/32 */
+    const seconds = beatSec * (divMap[slot] || 0.5);
+    if (seconds >= 2.0) return 0.0;
+    if (seconds <= 0.012) return 1.0;
+    return Math.log(seconds / 2.0) / Math.log(0.006);
+}
+
+function getTimeLabel(rate01) {
+    /* Matches DSP: seconds = 2.0 * 0.006^rate01 */
+    const seconds = 2.0 * Math.pow(0.006, rate01);
+    if (seconds >= 1.0) return seconds.toFixed(1) + 's';
+    const ms = Math.round(seconds * 1000);
+    return ms + 'ms';
 }
 
 /* ================================================================
@@ -629,8 +642,12 @@ function showOverlay(title, param, value) {
     overlayValue = String(value);
     overlayTimer = OVERLAY_DURATION;
 
-    const parts = [title, param, value].filter(s => s && s.length > 0);
-    announce(parts.join(', '));
+    const now = Date.now();
+    if (now - lastAnnounceTime >= ANNOUNCE_THROTTLE_MS) {
+        lastAnnounceTime = now;
+        const parts = [title, param, value].filter(s => s && s.length > 0);
+        announce(parts.join(', '));
+    }
 }
 
 /* ================================================================
@@ -656,32 +673,49 @@ function handlePadOn(note, velocity) {
             /* Latch on */
             fxLatched[slot] = true;
             fxActive[slot] = true;
+            lastTouchedSlot = slot;
+            if (slot <= 4) {
+                lastRepeatSlot = slot;
+                globalValues[0] = bpmSyncedRate(slot);
+                resetRepeatKnobs(slot);
+            }
             sendParam(`punch_${slot}_on`, velNorm);
             sendParam(`punch_${slot}_latch`, '1');
             showOverlay(FX_NAMES[slot], 'Latched', '');
         }
     } else {
+        /* Normal tap on latched pad = select for knob editing (don't unlatch) */
+        if (fxLatched[slot]) {
+            lastTouchedSlot = slot;
+            const names = SLOT_PARAM_NAMES[slot];
+            showOverlay(FX_NAMES[slot], `${names[0]} | ${names[1]} | ${names[2]}`, '');
+            refreshPadLED(slot);
+            return;
+        }
         /* Normal punch-in: hold = on.
          * If already active (missed note-off), deactivate first. */
-        if (fxActive[slot] && !fxLatched[slot]) {
+        if (fxActive[slot]) {
             sendParam(`punch_${slot}_off`, '1');
         }
         fxActive[slot] = true;
+        fxHeld[slot] = true;
+        lastTouchedSlot = slot;
+        if (slot <= 4) {
+            lastRepeatSlot = slot;
+            globalValues[0] = bpmSyncedRate(slot);
+            resetRepeatKnobs(slot);
+        }
         sendParam(`punch_${slot}_on`, velNorm);
     }
 
-    /* Update last touched for E1-E4 focus */
-    const prevTouched = lastTouched;
-    lastTouched = slot;
-    if (prevTouched >= 0 && prevTouched !== slot) {
-        refreshPadLED(prevTouched);
-    }
     refreshPadLED(slot);
 }
 
 function handlePadOff(note) {
     const slot = NOTE_TO_SLOT[note];
     if (slot === undefined) return;
+
+    fxHeld[slot] = false;
 
     /* If latched, pad release does nothing */
     if (fxLatched[slot]) return;
@@ -710,56 +744,75 @@ function handleAftertouch(note, pressure) {
 }
 
 function handleStep(stepIdx, pressed) {
-    if (!pressed) return;
-
-    if (shiftHeld) {
-        /* Shift+step = save scene */
-        sendParam(`scene_save_${stepIdx}`, '1');
-        stepPopulated[stepIdx] = true;
-        currentStep = stepIdx;
-        setLED(MoveSteps[stepIdx], White);
-        showOverlay('Scene', `Saved #${stepIdx + 1}`, '');
-    } else if (stepRecordMode) {
-        /* Step record mode: write step */
-        sendParam(`step_save_${stepIdx}`, '1');
-        stepPopulated[stepIdx] = true;
-        setLED(MoveSteps[stepIdx], BrightRed);
-        showOverlay('Step Record', `Written #${stepIdx + 1}`, '');
-    } else {
-        /* Tap = recall scene */
-        if (stepPopulated[stepIdx]) {
-            sendParam(`scene_recall_${stepIdx}`, '1');
-            if (currentStep >= 0) setLED(MoveSteps[currentStep], stepPopulated[currentStep] ? LightGrey : Black);
-            currentStep = stepIdx;
-            setLED(MoveSteps[stepIdx], White);
-            showOverlay('Scene', `Recalled #${stepIdx + 1}`, '');
-            syncFxState();
-        }
-    }
+    /* Step buttons unused — reserved for future */
 }
 
 function handleKnob(knobIndex, delta) {
-    if (knobIndex < 4) {
-        /* E1-E4: per-slot params for lastTouched */
-        if (lastTouched < 0 || (!fxActive[lastTouched] && !fxLatched[lastTouched])) {
-            showOverlay('E1-E4', 'Touch a pad first', '');
+    if (knobIndex === 0) {
+        /* E1: RPT Length — free seconds */
+        let v = globalValues[0] + delta * 0.01;
+        v = Math.max(0.0, Math.min(1.0, v));
+        globalValues[0] = v;
+        sendParam('repeat_rate', v.toFixed(3));
+        const timeLabel = getTimeLabel(v);
+        showOverlay('Repeat', `Length: ${timeLabel}`, v.toFixed(2));
+    } else if (knobIndex === 1) {
+        /* E2: RPT Speed — detent around 0.5 (normal) */
+        let v = globalValues[1] + delta * 0.01;
+        v = Math.max(0.0, Math.min(1.0, v));
+        /* Snap to 0.5 when crossing through the detent zone */
+        if (v >= 0.49 && v <= 0.51) v = 0.5;
+        globalValues[1] = v;
+        sendParam('repeat_speed', v.toFixed(3));
+        const label = v < 0.49 ? 'Slow' : v > 0.51 ? 'Fast' : 'Normal';
+        showOverlay('Repeat', `Speed: ${label}`, v.toFixed(2));
+    } else if (knobIndex === 2) {
+        /* E3: RPT on/off — turn right = on, turn left = off */
+        const slot = lastRepeatSlot;
+        if (delta > 0 && !fxActive[slot]) {
+            fxLatched[slot] = true;
+            fxActive[slot] = true;
+            lastTouchedSlot = slot;
+            sendParam(`punch_${slot}_on`, '0.700');
+            sendParam(`punch_${slot}_latch`, '1');
+            globalValues[2] = 1.0;
+            showOverlay(FX_NAMES[slot], 'Loop ON', '1.00');
+        } else if (delta < 0 && fxActive[slot]) {
+            fxLatched[slot] = false;
+            fxActive[slot] = false;
+            sendParam(`punch_${slot}_latch`, '0');
+            sendParam(`punch_${slot}_off`, '1');
+            globalValues[2] = 0.0;
+            showOverlay(FX_NAMES[slot], 'Loop OFF', '0.00');
+        }
+        refreshPadLED(slot);
+    } else if (knobIndex >= 3 && knobIndex <= 5) {
+        /* E4-E6: per-slot params for last touched pad */
+        if (lastTouchedSlot < 0 || lastTouchedSlot >= NUM_SLOTS) {
+            showOverlay('No FX', 'Tap a pad first', '');
             return;
         }
-        const slot = lastTouched;
-        let v = slotParams[slot][knobIndex] + delta * 0.01;
+        const slot = lastTouchedSlot;
+        const pi = knobIndex - 3;
+        let v = slotParams[slot][pi] + delta * 0.01;
         v = Math.max(0.0, Math.min(1.0, v));
-        slotParams[slot][knobIndex] = v;
-        sendParam(`punch_${slot}_param_${knobIndex}`, v.toFixed(3));
-        const label = FX_PARAM_LABELS[slot][knobIndex];
-        showOverlay(FX_NAMES[slot], label, v.toFixed(2));
-    } else {
-        /* E5-E8: global params */
-        const gi = knobIndex - 4;
-        let v = globalValues[gi] + delta * 0.01;
+        slotParams[slot][pi] = v;
+        sendParam(`punch_${slot}_param_${pi}`, v.toFixed(3));
+        showOverlay(FX_NAMES[slot], SLOT_PARAM_NAMES[slot][pi], v.toFixed(2));
+    } else if (knobIndex === 6) {
+        /* E7: Tilt EQ */
+        let v = globalValues[3] + delta * 0.01;
         v = Math.max(0.0, Math.min(1.0, v));
-        globalValues[gi] = v;
-        sendParam(GLOBAL_PARAMS[gi], v.toFixed(3));
-        showOverlay('Global', GLOBAL_LABELS[gi], v.toFixed(2));
+        globalValues[3] = v;
+        sendParam('tilt_eq', v.toFixed(3));
+        showOverlay('Global', 'Tilt', v.toFixed(2));
+    } else if (knobIndex === 7) {
+        /* E8: DJ Filter */
+        let v = globalValues[4] + delta * 0.01;
+        v = Math.max(0.0, Math.min(1.0, v));
+        globalValues[4] = v;
+        sendParam('dj_filter', v.toFixed(3));
+        showOverlay('Global', 'DJ Flt', v.toFixed(2));
     }
 }
 
@@ -768,79 +821,45 @@ function handleKnobPeek(knobNote) {
     if (knobNote === 9) return;
     if (knobNote === 8) return; /* Master knob = volume passthrough, no peek */
 
-    if (knobNote >= 0 && knobNote < 4) {
-        /* E1-E4: show per-slot param */
-        if (lastTouched >= 0 && (fxActive[lastTouched] || fxLatched[lastTouched])) {
-            const label = FX_PARAM_LABELS[lastTouched][knobNote];
-            const v = slotParams[lastTouched][knobNote];
-            showOverlay(FX_NAMES[lastTouched], label, v.toFixed(2));
+    if (knobNote === 0) {
+        /* E1: RPT Length */
+        const timeLabel = getTimeLabel(globalValues[0]);
+        showOverlay('Repeat', `Length: ${timeLabel}`, globalValues[0].toFixed(2));
+    } else if (knobNote === 1) {
+        /* E2: RPT Speed */
+        showOverlay('Repeat', 'Speed', globalValues[1].toFixed(2));
+    } else if (knobNote === 2) {
+        /* E3: RPT on/off */
+        const rptActive = fxActive[lastRepeatSlot] || fxLatched[lastRepeatSlot];
+        showOverlay(FX_NAMES[lastRepeatSlot], rptActive ? 'Loop ON' : 'Loop OFF', rptActive ? '1.00' : '0.00');
+    } else if (knobNote >= 3 && knobNote <= 5) {
+        /* E4-E6: per-slot params */
+        const pi = knobNote - 3;
+        if (lastTouchedSlot >= 0 && lastTouchedSlot < NUM_SLOTS) {
+            const slot = lastTouchedSlot;
+            showOverlay(FX_NAMES[slot], SLOT_PARAM_NAMES[slot][pi],
+                       slotParams[slot][pi].toFixed(2));
         } else {
-            showOverlay('E1-E4', 'Touch a pad', '');
+            showOverlay('No FX', 'Tap a pad first', '');
         }
-    } else if (knobNote >= 4 && knobNote < 8) {
-        /* E5-E8: show global param */
-        const gi = knobNote - 4;
-        showOverlay('Global', GLOBAL_LABELS[gi], globalValues[gi].toFixed(2));
+    } else if (knobNote === 6) {
+        /* E7: Tilt EQ */
+        showOverlay('Global', 'Tilt', globalValues[3].toFixed(2));
+    } else if (knobNote === 7) {
+        /* E8: DJ Filter */
+        showOverlay('Global', 'DJ Flt', globalValues[4].toFixed(2));
     }
 }
 
 function handleTrackButton(trackIdx, pressed) {
-    if (!pressed) return;
-
-    if (shiftHeld) {
-        /* Shift+Track: solo */
-        for (let i = 0; i < 4; i++) {
-            trackRouted[i] = (i === trackIdx);
-        }
-    } else {
-        trackRouted[trackIdx] = !trackRouted[trackIdx];
-    }
-
-    let mask = 0;
-    for (let i = 0; i < 4; i++) {
-        if (trackRouted[i]) mask |= (1 << i);
-    }
-    sendParam('track_mask', String(mask));
-
-    if (mask > 0 && audioSource !== 2) {
-        audioSource = 2;
-        sendParam('audio_source', '2');
-    } else if (mask === 0 && audioSource === 2) {
-        audioSource = 1;
-        sendParam('audio_source', '1');
-    }
-
-    for (let i = 0; i < 4; i++) {
-        setButtonLED(TRACK_CCS[i], trackRouted[i] ? WhiteLedBright : WhiteLedDim);
-    }
-
-    let trackList = [];
-    for (let i = 0; i < 4; i++) {
-        if (trackRouted[i]) trackList.push(`T${i + 1}`);
-    }
-    showOverlay('Source', trackList.length > 0 ? `Tracks: ${trackList.join('+')}` : 'Move Mix', '');
+    /* Track buttons unused — always Move Mix */
 }
 
 function handleJogScroll(delta) {
-    /* Scroll through active/latched FX to change lastTouched for E1-E4 */
-    let activeSlots = [];
-    for (let i = 0; i < NUM_SLOTS; i++) {
-        if (fxActive[i] || fxLatched[i]) activeSlots.push(i);
-    }
-    if (activeSlots.length === 0) return;
-
-    let curIdx = activeSlots.indexOf(lastTouched);
-    if (curIdx < 0) curIdx = 0;
-    curIdx = (curIdx + (delta > 0 ? 1 : -1) + activeSlots.length) % activeSlots.length;
-
-    const prevTouched = lastTouched;
-    lastTouched = activeSlots[curIdx];
-
-    if (prevTouched >= 0 && prevTouched !== lastTouched) {
-        refreshPadLED(prevTouched);
-    }
-    refreshPadLED(lastTouched);
-    showOverlay(FX_NAMES[lastTouched], 'E1-E4 Focus', '');
+    /* Jog scroll adjusts BPM in coarse steps */
+    bpm = Math.max(20, Math.min(300, bpm + delta * 1.0));
+    sendParam('bpm', bpm.toFixed(1));
+    showOverlay('Tempo', `${bpm.toFixed(1)} BPM`, (bpm / 300).toFixed(2));
 }
 
 function syncFxState() {
@@ -864,26 +883,8 @@ function syncFxState() {
         }
     } catch (e) { /* ignore */ }
 
-    try {
-        const ltStr = getParam('last_touched');
-        if (ltStr) {
-            const lt = parseInt(ltStr, 10);
-            if (lt >= 0 && lt < NUM_SLOTS) lastTouched = lt;
-        }
-    } catch (e) { /* ignore */ }
 }
 
-function syncStepPopulatedState() {
-    try {
-        const raw = getParam('step_populated');
-        if (raw) {
-            const arr = JSON.parse(raw);
-            for (let i = 0; i < 16; i++) {
-                stepPopulated[i] = arr[i] === 1;
-            }
-        }
-    } catch (e) { /* ignore */ }
-}
 
 /* ================================================================
  * Lifecycle
@@ -898,13 +899,12 @@ globalThis.init = function() {
     if (!stateLoaded) {
         /* Fresh start - push defaults */
         sendParam('bpm', String(bpm));
-        sendParam('audio_source', String(audioSource));
-        for (let i = 0; i < 4; i++) {
-            sendParam(GLOBAL_PARAMS[i], GLOBAL_DEFAULTS[i].toFixed(3));
+        sendParam('audio_source', '1');
+        for (let i = 0; i < NUM_GLOBALS; i++) {
+            if (GLOBAL_KEYS[i] === 'rpt_toggle') continue;
+            sendParam(GLOBAL_KEYS[i], GLOBAL_DEFAULTS[i].toFixed(3));
         }
     }
-
-    syncStepPopulatedState();
 
     ledInitPending = true;
     ledInitIndex = 0;
@@ -918,20 +918,6 @@ globalThis.tick = function() {
 
     /* Drain queued params (pressure, knob values, etc.) */
     drainParamQueue();
-
-    /* Sync step sequencer position from DSP */
-    if (stepSeqActive) {
-        const raw = getParam('current_step');
-        if (raw) {
-            const newStep = parseInt(raw, 10);
-            if (newStep !== currentStep && newStep >= 0 && newStep < 16) {
-                if (currentStep >= 0) setLED(MoveSteps[currentStep], stepPopulated[currentStep] ? LightGrey : Black);
-                currentStep = newStep;
-                setLED(MoveSteps[currentStep], White);
-                syncFxState();
-            }
-        }
-    }
 
     /* Autosave */
     autosaveCounter++;
@@ -1014,6 +1000,25 @@ globalThis.onMidiMessageInternal = function(data) {
         /* Shift */
         if (d1 === MoveShift) {
             shiftHeld = d2 > 0;
+            /* Shift pressed while holding pads → latch/unlatch them */
+            if (shiftHeld) {
+                for (let i = 0; i < NUM_SLOTS; i++) {
+                    if (fxHeld[i]) {
+                        if (fxLatched[i]) {
+                            /* Already latched: unlatch (will release on pad-off) */
+                            fxLatched[i] = false;
+                            sendParam(`punch_${i}_latch`, '0');
+                            showOverlay(FX_NAMES[i], 'Unlatched', '');
+                        } else {
+                            /* Not latched: latch it */
+                            fxLatched[i] = true;
+                            sendParam(`punch_${i}_latch`, '1');
+                            showOverlay(FX_NAMES[i], 'Latched', '');
+                        }
+                        refreshPadLED(i);
+                    }
+                }
+            }
             return;
         }
 
@@ -1056,83 +1061,8 @@ globalThis.onMidiMessageInternal = function(data) {
             return;
         }
 
-        /* Loop - toggle step sequencer on/off */
-        if (d1 === MoveLoop && d2 > 0) {
-            stepSeqActive = !stepSeqActive;
-            sendParam('step_seq_active', stepSeqActive ? '1' : '0');
-            setButtonLED(MoveLoop, stepSeqActive ? WhiteLedBright : WhiteLedDim);
-            showOverlay('Step Seq', stepSeqActive ? 'ON' : 'OFF', '');
-            return;
-        }
-
-        /* Copy - cycle audio source */
+        /* Copy - unused */
         if (d1 === MoveCopy && d2 > 0) {
-            audioSource = (audioSource + 1) % 3;
-            sendParam('audio_source', String(audioSource));
-            const sourceNames = ['Line In', 'Move Mix', 'Tracks'];
-            showOverlay('Source', sourceNames[audioSource], '');
-
-            if (audioSource !== 2) {
-                for (let i = 0; i < 4; i++) trackRouted[i] = false;
-                sendParam('track_mask', '0');
-                for (let i = 0; i < 4; i++) {
-                    setButtonLED(TRACK_CCS[i], WhiteLedDim);
-                }
-            } else {
-                for (let i = 0; i < 4; i++) trackRouted[i] = true;
-                sendParam('track_mask', '15');
-                for (let i = 0; i < 4; i++) {
-                    setButtonLED(TRACK_CCS[i], WhiteLedBright);
-                }
-            }
-            return;
-        }
-
-        /* Delete - Shift+Delete clears current step */
-        if (d1 === MoveDelete && d2 > 0) {
-            if (shiftHeld && currentStep >= 0) {
-                sendParam(`step_clear_${currentStep}`, '1');
-                stepPopulated[currentStep] = false;
-                setLED(MoveSteps[currentStep], Black);
-                showOverlay('Scene', `Cleared #${currentStep + 1}`, '');
-                currentStep = -1;
-            }
-            return;
-        }
-
-        /* Rec - Step record mode */
-        if (d1 === MoveRec && d2 > 0) {
-            stepRecordMode = !stepRecordMode;
-            showOverlay('Step Record', stepRecordMode ? 'ON - press steps' : 'OFF', '');
-            setButtonLED(MoveRec, stepRecordMode ? WhiteLedBright : WhiteLedDim);
-            return;
-        }
-
-        /* Play - transport start/stop */
-        if (d1 === MovePlay && d2 > 0) {
-            transportRunning = !transportRunning;
-            sendParam('transport_running', transportRunning ? '1' : '0');
-            setButtonLED(MovePlay, transportRunning ? WhiteLedBright : WhiteLedDim);
-            showOverlay('Transport', transportRunning ? 'Running' : 'Stopped', '');
-            return;
-        }
-
-        /* Capture - record output to WAV */
-        if (d1 === MoveCapture && d2 > 0) {
-            if (isRecording) {
-                host_sampler_stop();
-                isRecording = false;
-                showOverlay('Record', 'Stopped', '');
-                setButtonLED(MoveCapture, WhiteLedDim);
-            } else {
-                const now = new Date();
-                const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
-                const path = `/data/UserData/UserLibrary/Recordings/pfx_${ts}.wav`;
-                host_sampler_start(path);
-                isRecording = true;
-                showOverlay('Record', 'Recording...', '');
-                setButtonLED(MoveCapture, WhiteLedBright);
-            }
             return;
         }
 
@@ -1154,11 +1084,7 @@ globalThis.onMidiMessageInternal = function(data) {
         /* Jog click */
         if (d1 === MoveMainButton && d2 > 0) {
             if (shiftHeld) {
-                /* Shift+Click = cycle audio source */
-                audioSource = (audioSource + 1) % 3;
-                sendParam('audio_source', String(audioSource));
-                const sourceNames = ['Line In', 'Move Mix', 'Tracks'];
-                showOverlay('Source', sourceNames[audioSource], '');
+                /* Shift+Click = unused */
             } else {
                 /* Click = tap tempo */
                 handleTapTempo();

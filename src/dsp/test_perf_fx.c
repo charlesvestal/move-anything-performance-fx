@@ -74,10 +74,10 @@ static void test_engine_init_destroy(void) {
     TEST("Engine init and destroy");
     perf_fx_engine_t e = make_engine();
 
+    ASSERT_NEAR(e.dj_filter, 0.5f, 0.01f, "dj_filter default");
+    ASSERT_NEAR(e.tilt_eq, 0.5f, 0.01f, "tilt_eq default");
     ASSERT_NEAR(e.dry_wet, 1.0f, 0.01f, "dry_wet default");
-    ASSERT_NEAR(e.global_lpf, 1.0f, 0.01f, "global_lpf default");
-    ASSERT_NEAR(e.global_hpf, 0.0f, 0.01f, "global_hpf default");
-    ASSERT_NEAR(e.eq_bump_freq, 0.5f, 0.01f, "eq_bump_freq default");
+    ASSERT_NEAR(e.repeat_rate, 0.5f, 0.01f, "repeat_rate default");
     ASSERT_NEAR(e.bpm, 120.0f, 0.01f, "bpm default");
     ASSERT_EQ_INT(e.last_touched_slot, -1, "last_touched default");
     ASSERT_TRUE(e.capture_buf_l != NULL, "capture buf L allocated");
@@ -370,16 +370,14 @@ static void test_set_param(void) {
     pfx_set_param(&e, FX_DELAY, 0, 0.1f);
     pfx_set_param(&e, FX_DELAY, 1, 0.2f);
     pfx_set_param(&e, FX_DELAY, 2, 0.3f);
-    pfx_set_param(&e, FX_DELAY, 3, 0.4f);
 
     ASSERT_NEAR(e.slots[FX_DELAY].params[0], 0.1f, 0.001f, "param 0");
     ASSERT_NEAR(e.slots[FX_DELAY].params[1], 0.2f, 0.001f, "param 1");
     ASSERT_NEAR(e.slots[FX_DELAY].params[2], 0.3f, 0.001f, "param 2");
-    ASSERT_NEAR(e.slots[FX_DELAY].params[3], 0.4f, 0.001f, "param 3");
 
     /* Out of range idx should be ignored */
     pfx_set_param(&e, FX_DELAY, -1, 0.9f);
-    pfx_set_param(&e, FX_DELAY, 4, 0.9f);
+    pfx_set_param(&e, FX_DELAY, 3, 0.9f);
 
     /* Values should be clamped */
     pfx_set_param(&e, FX_RPT_1_4, 0, 2.0f);
@@ -438,8 +436,8 @@ static void test_space_tail(void) {
     perf_fx_engine_t e = make_engine();
 
     /* Test all space FX types */
-    int space_slots[] = { FX_DELAY, FX_PING_PONG, FX_TAPE_ECHO, FX_ECHO_FREEZE,
-                          FX_REVERB, FX_SHIMMER, FX_DARK_VERB, FX_SPRING };
+    int space_slots[] = { FX_DELAY, FX_DELAY_DOT8, FX_PING_PONG, FX_PING_PONG_DOT8,
+                          FX_REVERB, FX_HALL, FX_DARK_VERB, FX_SPRING };
     for (int i = 0; i < 8; i++) {
         int slot = space_slots[i];
         pfx_activate(&e, slot, 0.8f);
@@ -455,168 +453,7 @@ static void test_space_tail(void) {
 }
 
 /* ============================================================
- * 9. Scenes: save/recall with latched pads, params, globals
- * ============================================================ */
-
-static void test_scene_save_recall(void) {
-    TEST("Scene save and recall");
-    perf_fx_engine_t e = make_engine();
-
-    /* Set up state: latch two FX, set params and globals */
-    pfx_activate(&e, FX_RPT_1_8, 0.7f);
-    pfx_set_latched(&e, FX_RPT_1_8, 1);
-    pfx_set_param(&e, FX_RPT_1_8, 0, 0.42f);
-
-    pfx_activate(&e, FX_REVERB, 0.9f);
-    pfx_set_latched(&e, FX_REVERB, 1);
-    pfx_set_param(&e, FX_REVERB, 1, 0.88f);
-
-    e.global_hpf = 0.3f;
-    e.global_lpf = 0.8f;
-    e.dry_wet = 0.7f;
-    e.eq_bump_freq = 0.6f;
-
-    pfx_scene_save(&e, 0);
-    ASSERT_EQ_INT(e.scenes[0].populated, 1, "scene 0 populated");
-
-    /* Change all state */
-    pfx_set_latched(&e, FX_RPT_1_8, 0);
-    e.slots[FX_RPT_1_8].pressure = 0.0f;
-    pfx_set_latched(&e, FX_REVERB, 0);
-    e.slots[FX_REVERB].pressure = 0.0f;
-    pfx_set_param(&e, FX_RPT_1_8, 0, 0.99f);
-    pfx_set_param(&e, FX_REVERB, 1, 0.11f);
-    e.global_hpf = 0.0f;
-    e.global_lpf = 1.0f;
-    e.dry_wet = 0.3f;
-    e.eq_bump_freq = 0.5f;
-
-    /* Recall scene 0 */
-    pfx_scene_recall(&e, 0);
-    ASSERT_EQ_INT(e.slots[FX_RPT_1_8].latched, 1, "rpt latched restored");
-    ASSERT_EQ_INT(e.slots[FX_RPT_1_8].active, 1, "rpt active after recall");
-    ASSERT_EQ_INT(e.slots[FX_REVERB].latched, 1, "reverb latched restored");
-    ASSERT_EQ_INT(e.slots[FX_REVERB].active, 1, "reverb active after recall");
-    ASSERT_NEAR(e.slots[FX_RPT_1_8].params[0], 0.42f, 0.01f, "rpt param restored");
-    ASSERT_NEAR(e.slots[FX_REVERB].params[1], 0.88f, 0.01f, "reverb param restored");
-    ASSERT_NEAR(e.global_hpf, 0.3f, 0.01f, "global_hpf restored");
-    ASSERT_NEAR(e.global_lpf, 0.8f, 0.01f, "global_lpf restored");
-    ASSERT_NEAR(e.dry_wet, 0.7f, 0.01f, "dry_wet restored");
-    ASSERT_NEAR(e.eq_bump_freq, 0.6f, 0.01f, "eq_bump_freq restored");
-
-    pfx_engine_destroy(&e);
-    PASS();
-}
-
-static void test_scene_clear(void) {
-    TEST("Scene clear");
-    perf_fx_engine_t e = make_engine();
-
-    pfx_scene_save(&e, 5);
-    ASSERT_EQ_INT(e.scenes[5].populated, 1, "scene 5 populated");
-
-    pfx_scene_clear(&e, 5);
-    ASSERT_EQ_INT(e.scenes[5].populated, 0, "scene 5 cleared");
-
-    pfx_engine_destroy(&e);
-    PASS();
-}
-
-static void test_scene_bounds(void) {
-    TEST("Scene bounds checking");
-    perf_fx_engine_t e = make_engine();
-
-    /* Should not crash */
-    pfx_scene_save(&e, -1);
-    pfx_scene_save(&e, 16);
-    pfx_scene_recall(&e, -1);
-    pfx_scene_recall(&e, 16);
-    pfx_scene_clear(&e, -1);
-    pfx_scene_clear(&e, 16);
-
-    pfx_engine_destroy(&e);
-    PASS();
-}
-
-static void test_scene_recall_empty(void) {
-    TEST("Scene recall unpopulated (no-op)");
-    perf_fx_engine_t e = make_engine();
-
-    e.dry_wet = 0.42f;
-    pfx_scene_recall(&e, 0); /* not populated */
-    ASSERT_NEAR(e.dry_wet, 0.42f, 0.01f, "state unchanged");
-
-    pfx_engine_destroy(&e);
-    PASS();
-}
-
-/* ============================================================
- * 10. Step presets: save/recall/clear
- * ============================================================ */
-
-static void test_step_save_recall(void) {
-    TEST("Step preset save and recall");
-    perf_fx_engine_t e = make_engine();
-
-    pfx_activate(&e, FX_CHORUS, 0.5f);
-    pfx_set_latched(&e, FX_CHORUS, 1);
-    pfx_set_param(&e, FX_CHORUS, 0, 0.33f);
-    e.dry_wet = 0.65f;
-
-    pfx_step_save(&e, 3);
-    ASSERT_EQ_INT(e.step_presets[3].populated, 1, "step 3 populated");
-
-    /* Change state */
-    pfx_set_latched(&e, FX_CHORUS, 0);
-    e.slots[FX_CHORUS].pressure = 0.0f;
-    pfx_set_param(&e, FX_CHORUS, 0, 0.99f);
-    e.dry_wet = 0.1f;
-
-    pfx_step_recall(&e, 3);
-    ASSERT_NEAR(e.dry_wet, 0.65f, 0.01f, "dry_wet restored");
-    ASSERT_EQ_INT(e.slots[FX_CHORUS].latched, 1, "chorus latched after recall");
-    ASSERT_EQ_INT(e.slots[FX_CHORUS].active, 1, "chorus active after recall");
-    ASSERT_NEAR(e.slots[FX_CHORUS].params[0], 0.33f, 0.01f, "chorus param restored");
-    ASSERT_EQ_INT(e.current_step_preset, 3, "current_step_preset updated");
-
-    pfx_engine_destroy(&e);
-    PASS();
-}
-
-static void test_step_clear(void) {
-    TEST("Step preset clear");
-    perf_fx_engine_t e = make_engine();
-
-    pfx_step_save(&e, 7);
-    ASSERT_EQ_INT(e.step_presets[7].populated, 1, "step 7 populated");
-
-    /* Set current so we can test clearing resets it */
-    e.current_step_preset = 7;
-    pfx_step_clear(&e, 7);
-    ASSERT_EQ_INT(e.step_presets[7].populated, 0, "step 7 cleared");
-    ASSERT_EQ_INT(e.current_step_preset, -1, "current_step_preset reset");
-
-    pfx_engine_destroy(&e);
-    PASS();
-}
-
-static void test_step_bounds(void) {
-    TEST("Step preset bounds checking");
-    perf_fx_engine_t e = make_engine();
-
-    pfx_step_save(&e, -1);
-    pfx_step_save(&e, 16);
-    pfx_step_recall(&e, -1);
-    pfx_step_recall(&e, 16);
-    pfx_step_clear(&e, -1);
-    pfx_step_clear(&e, 16);
-
-    pfx_engine_destroy(&e);
-    PASS();
-}
-
-/* ============================================================
- * 11. Render: bypass produces passthrough, active FX modifies output
+ * 9. Render: bypass produces passthrough, active FX modifies output
  * ============================================================ */
 
 static void test_render_bypass(void) {
@@ -801,8 +638,8 @@ static void test_serialize_state(void) {
 
     e.bpm = 140.0f;
     e.dry_wet = 0.65f;
-    e.global_hpf = 0.2f;
-    e.eq_bump_freq = 0.7f;
+    e.dj_filter = 0.3f;
+    e.tilt_eq = 0.7f;
 
     char buf[8192];
     int len = pfx_serialize_state(&e, buf, sizeof(buf));
@@ -835,7 +672,7 @@ static void test_fx_category_macros(void) {
     ASSERT_TRUE(!FX_IS_SPACE(FX_BITCRUSH), "BITCRUSH not space");
 
     ASSERT_TRUE(FX_IS_DISTORT(FX_BITCRUSH), "BITCRUSH is distort");
-    ASSERT_TRUE(FX_IS_DISTORT(FX_CHORUS), "CHORUS is distort");
+    ASSERT_TRUE(FX_IS_DISTORT(FX_TREMOLO), "TREMOLO is distort");
     ASSERT_TRUE(!FX_IS_DISTORT(FX_RPT_1_4), "RPT not distort");
 
     PASS();
@@ -910,17 +747,6 @@ int main(void) {
 
     printf("\nSpace FX Tail:\n");
     test_space_tail();
-
-    printf("\nScenes:\n");
-    test_scene_save_recall();
-    test_scene_clear();
-    test_scene_bounds();
-    test_scene_recall_empty();
-
-    printf("\nStep Presets:\n");
-    test_step_save_recall();
-    test_step_clear();
-    test_step_bounds();
 
     printf("\nRendering:\n");
     test_render_bypass();

@@ -45,6 +45,7 @@ struct pfx_bungee {
     int out_read;           /* read cursor in out_buf */
 
     float speed;
+    float pitch;
     bool needs_reset;
 };
 
@@ -52,6 +53,7 @@ extern "C" pfx_bungee_t *pfx_bungee_create(int sample_rate) {
     auto *b = new pfx_bungee_t();
     b->sample_rate = sample_rate;
     b->speed = 0.5f;
+    b->pitch = 1.0f;
 
     b->stretcher = new Bungee::Stretcher<Bungee::Basic>(
         Bungee::SampleRates{sample_rate, sample_rate}, 2, 0);
@@ -90,6 +92,12 @@ extern "C" void pfx_bungee_set_speed(pfx_bungee_t *b, float speed) {
     if (!b) return;
     b->speed = speed;
     b->req.speed = (double)speed;
+}
+
+extern "C" void pfx_bungee_set_pitch(pfx_bungee_t *b, float pitch) {
+    if (!b) return;
+    b->pitch = pitch;
+    b->req.pitch = (double)pitch;
 }
 
 extern "C" void pfx_bungee_reset(pfx_bungee_t *b) {
@@ -152,7 +160,7 @@ extern "C" int pfx_bungee_read(pfx_bungee_t *b, float *out_lr, int max_frames) {
         int64_t start = b->write_pos;
         b->req.position = (double)start;
         b->req.speed = (double)b->speed;
-        b->req.pitch = 1.0;
+        b->req.pitch = (double)b->pitch;
         b->req.reset = true;
         b->req.resampleMode = resampleMode_autoOut;
 
@@ -164,6 +172,7 @@ extern "C" int pfx_bungee_read(pfx_bungee_t *b, float *out_lr, int max_frames) {
     }
 
     b->req.speed = (double)b->speed;
+    b->req.pitch = (double)b->pitch;
 
     /* Generate grains until we have enough output */
     int produced = 0;

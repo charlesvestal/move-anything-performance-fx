@@ -39,51 +39,51 @@ static const char *FX_NAMES[PFX_NUM_FX] = {
     "LP Sweep", "HP Sweep", "BP Rise", "BP Fall",
     "Reso Sweep", "Phaser", "Flanger", "Auto Filter",
     /* Row 2: Space Throws (slots 16-23) */
-    "Delay", "Ping Pong", "Tape Echo", "Echo Freeze",
-    "Reverb", "Shimmer", "Dark Verb", "Spring",
+    "Delay 1/4", "Delay D8", "PingPong 1/4", "PingPong D8",
+    "Room", "Hall", "Dark Verb", "Spring",
     /* Row 1: Distortion & Rhythm (slots 24-31) */
-    "Bitcrush", "Downsample", "Tape Stop", "Vinyl Brake",
-    "Saturate", "Gate/Duck", "Tremolo", "Chorus"
+    "Bitcrush", "Downsample", "Saturate", "Gate/Duck",
+    "Tremolo", "Octave Down", "Vinyl Sim", "Vinyl Brake"
 };
 
 /* Per-FX param names (4 params each, mapped to E1-E4) */
-static const char *FX_PARAM_NAMES[PFX_NUM_FX][4] = {
-    /* Row 4 */
-    {"Rate", "Swing", "Pitch", "Mix"},           /* RPT 1/4 */
-    {"Rate", "Swing", "Pitch", "Mix"},           /* RPT 1/8 */
-    {"Rate", "Swing", "Pitch", "Mix"},           /* RPT 1/16 */
-    {"Rate", "Swing", "Pitch", "Mix"},           /* RPT Trip */
-    {"Length", "Rate", "Pitch", "Mix"},          /* Stutter */
-    {"Density", "Range", "Pitch", "Mix"},        /* Scatter */
-    {"Speed", "Length", "Pitch", "Mix"},         /* Reverse */
-    {"Speed", "Tone", "Pitch", "Mix"},           /* Timestretch */
-    /* Row 3 */
-    {"Speed", "Reso", "Depth", "Mix"},           /* LP Sweep */
-    {"Speed", "Reso", "Depth", "Mix"},           /* HP Sweep */
-    {"Speed", "Reso", "Range", "Mix"},           /* BP Rise */
-    {"Speed", "Reso", "Range", "Mix"},           /* BP Fall */
-    {"Speed", "Reso", "Range", "Mix"},           /* Reso Sweep */
-    {"Depth", "Feedbk", "Stages", "Mix"},        /* Phaser */
-    {"Depth", "Feedbk", "Rate", "Mix"},          /* Flanger */
-    {"Depth", "Center", "Reso", "Mix"},          /* Auto Filter */
-    /* Row 2 */
-    {"Time", "Feedbk", "Filter", "Mix"},         /* Delay */
-    {"Time", "Feedbk", "Spread", "Mix"},         /* Ping Pong */
-    {"Age", "Wow/Flut", "Feedbk", "Mix"},        /* Tape Echo */
-    {"Time", "Feedbk", "Freeze", "Mix"},         /* Echo Freeze */
-    {"Decay", "Damping", "Mod", "Mix"},          /* Reverb */
-    {"Decay", "Pitch", "Mod", "Mix"},            /* Shimmer */
-    {"Decay", "Dark", "Mod", "Mix"},             /* Dark Verb */
-    {"Decay", "Tone", "Drip", "Mix"},            /* Spring */
-    /* Row 1 */
-    {"Bits", "Tone", "Alias", "Mix"},            /* Bitcrush */
-    {"Rate", "Tone", "Smooth", "Mix"},           /* Downsample */
-    {"Speed", "Curve", "Noise", "Mix"},          /* Tape Stop */
-    {"Speed", "Curve", "Noise", "Mix"},          /* Vinyl Brake */
-    {"Tone", "Curve", "Drive", "Mix"},           /* Saturate */
-    {"Rate", "Depth", "Shape", "Mix"},           /* Gate/Duck */
-    {"Depth", "Shape", "Stereo", "Mix"},         /* Tremolo */
-    {"Rate", "Feedbk", "Depth", "Mix"}           /* Chorus */
+static const char *FX_PARAM_NAMES[PFX_NUM_FX][PFX_SLOT_PARAMS] = {
+    /* Row 4: Time/Repeat */
+    {"Speed",  "Filter", "Gate"},           /* RPT 1/4 */
+    {"Speed",  "Filter", "Gate"},           /* RPT 1/8 */
+    {"Speed",  "Filter", "Gate"},           /* RPT 1/16 */
+    {"Speed",  "Filter", "Gate"},           /* RPT Trip */
+    {"Speed",  "Filter", "Gate"},           /* Stutter */
+    {"Pattern", "Gate",  "Revrse"},         /* Scatter */
+    {"Feedbk", "Filter", "Mix"},            /* Reverse */
+    {"Tone",   "WowFlt", "Mix"},            /* Half Speed */
+    /* Row 3: Filter Sweeps */
+    {"Speed",  "Reso",   "Depth"},          /* LP Sweep Down */
+    {"Speed",  "Reso",   "Depth"},          /* HP Sweep Up */
+    {"Speed",  "Reso",   "Width"},          /* BP Rise */
+    {"Speed",  "Reso",   "Width"},          /* BP Fall */
+    {"Speed",  "Reso",   "Mix"},            /* Reso Sweep */
+    {"Depth",  "Feedbk", "Mix"},            /* Phaser */
+    {"Depth",  "Feedbk", "Mix"},            /* Flanger */
+    {"Depth",  "Center", "Reso"},           /* Auto Filter */
+    /* Row 2: Space Throws */
+    {"Feedbk", "Tone",   "Level"},          /* Delay 1/4 */
+    {"Feedbk", "Tone",   "Level"},          /* Delay Dot8 */
+    {"Feedbk", "Tone",   "Level"},          /* Ping Pong */
+    {"Feedbk", "Tone",   "Level"},          /* PP Dot8 */
+    {"Time",   "Tone",   "Level"},          /* Reverb */
+    {"Time",   "Tone",   "Level"},          /* Hall */
+    {"Time",   "Dark",   "Level"},          /* Dark Verb */
+    {"Time",   "Tone",   "Level"},          /* Spring */
+    /* Row 1: Distortion & Rhythm */
+    {"Filter", "Tone",   "Mix"},            /* Bitcrush */
+    {"Filter", "Tone",   "Mix"},            /* Downsample */
+    {"Drive",  "Tone",   "Mix"},            /* Saturate */
+    {"Speed",  "Shape",  "Depth"},          /* Gate/Duck */
+    {"Rate",   "Depth",  "Wave"},           /* Tremolo */
+    {"Tone",   "WowFlt", "Mix"},            /* Octave Down */
+    {"Noise",  "WowFlt", "Tone"},           /* Vinyl Sim */
+    {"Speed",  "Tone",   "Mix"}             /* Tape Stop */
 };
 
 typedef struct {
@@ -125,6 +125,16 @@ static void *fx_create(const char *module_dir, const char *config_json) {
         inst->engine.audio_in_offset = g_host->audio_in_offset;
     }
 
+    /* Load vinyl crackle sample */
+    if (module_dir) {
+        char crackle_path[512];
+        snprintf(crackle_path, sizeof(crackle_path), "%s/vinyl_crackle.wav", module_dir);
+        pfx_engine_load_vinyl_crackle(&inst->engine, crackle_path);
+        log_msg("pfx: vinyl crackle: %s (%d samples)",
+                inst->engine.vinyl_crackle_buf ? "loaded" : "not found",
+                inst->engine.vinyl_crackle_len);
+    }
+
     log_msg("pfx: Performance FX v2 engine initialized (32 unified FX)");
 
     /* Try to map Link Audio track shared memory */
@@ -163,19 +173,22 @@ static void fx_process_block(void *instance, int16_t *audio_inout, int frames) {
     pfx_instance_t *inst = (pfx_instance_t *)instance;
     if (!inst) return;
 
-    /* Copy per-track audio from shm if available */
-    if (inst->track_shm && inst->track_shm->sequence != inst->last_track_seq) {
-        inst->last_track_seq = inst->track_shm->sequence;
-        int ch = inst->track_shm->channel_count;
-        if (ch > 4) ch = 4;
-        for (int t = 0; t < ch; t++) {
-            memcpy(inst->track_bufs[t], inst->track_shm->audio[t],
-                   frames * 2 * sizeof(int16_t));
-            inst->engine.track_audio[t] = inst->track_bufs[t];
+    /* Copy per-track audio from shm if available (disabled — always Move Mix for now) */
+    if (inst->track_shm) {
+        uint32_t cur_seq = inst->track_shm->sequence;
+        if (cur_seq != inst->last_track_seq) {
+            inst->last_track_seq = cur_seq;
+            int ch = inst->track_shm->channel_count;
+            if (ch > 4) ch = 4;
+            for (int t = 0; t < ch; t++) {
+                memcpy(inst->track_bufs[t], inst->track_shm->audio[t],
+                       frames * 2 * sizeof(int16_t));
+                inst->engine.track_audio[t] = inst->track_bufs[t];
+            }
         }
-        inst->engine.track_audio_valid = 1;
+        inst->engine.track_audio_valid = (inst->engine.track_audio[0] != NULL);
     } else {
-        inst->engine.track_audio_valid = (inst->track_shm != NULL);
+        inst->engine.track_audio_valid = 0;
     }
 
     inst->engine.direct_input = audio_inout;
@@ -192,11 +205,12 @@ static void fx_set_param(void *instance, const char *key, const char *val) {
     float fval = (float)atof(val);
     int ival = atoi(val);
 
-    /* Global params (E5-E8) */
-    if (strcmp(key, "global_hpf") == 0) { e->global_hpf = clampf(fval, 0, 1); return; }
-    if (strcmp(key, "global_lpf") == 0) { e->global_lpf = clampf(fval, 0, 1); return; }
+    /* Global params (E6-E8) */
+    if (strcmp(key, "dj_filter") == 0) { e->dj_filter = clampf(fval, 0, 1); return; }
+    if (strcmp(key, "tilt_eq") == 0) { e->tilt_eq = clampf(fval, 0, 1); return; }
     if (strcmp(key, "dry_wet") == 0) { e->dry_wet = clampf(fval, 0, 1); return; }
-    if (strcmp(key, "eq_bump_freq") == 0) { e->eq_bump_freq = clampf(fval, 0, 1); return; }
+    if (strcmp(key, "repeat_rate") == 0) { e->repeat_rate = clampf(fval, 0, 1); return; }
+    if (strcmp(key, "repeat_speed") == 0) { e->repeat_speed = clampf(fval, 0, 1); return; }
 
     /* Engine params */
     if (strcmp(key, "bpm") == 0) { e->bpm = clampf(fval, 20, 300); return; }
@@ -235,33 +249,6 @@ static void fx_set_param(void *instance, const char *key, const char *val) {
         return;
     }
 
-    /* Scene management: scene_save_N, scene_recall_N, scene_clear_N */
-    if (strncmp(key, "scene_", 6) == 0) {
-        if (strncmp(key + 6, "save_", 5) == 0) {
-            pfx_scene_save(e, atoi(key + 11));
-        } else if (strncmp(key + 6, "recall_", 7) == 0) {
-            pfx_scene_recall(e, atoi(key + 13));
-        } else if (strncmp(key + 6, "clear_", 6) == 0) {
-            pfx_scene_clear(e, atoi(key + 12));
-        }
-        return;
-    }
-
-    /* Step preset management: step_save_N, step_recall_N, step_clear_N */
-    if (strncmp(key, "step_", 5) == 0) {
-        if (strncmp(key + 5, "save_", 5) == 0) {
-            pfx_step_save(e, atoi(key + 10));
-        } else if (strncmp(key + 5, "recall_", 7) == 0) {
-            pfx_step_recall(e, atoi(key + 12));
-        } else if (strncmp(key + 5, "clear_", 6) == 0) {
-            pfx_step_clear(e, atoi(key + 11));
-        }
-        return;
-    }
-
-    /* Step FX sequencer */
-    if (strcmp(key, "step_seq_active") == 0) { e->step_seq_active = ival; return; }
-    if (strcmp(key, "step_seq_division") == 0) { e->step_seq_division = ival; return; }
 }
 
 static int fx_get_param(void *instance, const char *key, char *buf, int buf_len) {
@@ -273,10 +260,11 @@ static int fx_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "Performance FX");
 
     /* Global params */
-    if (strcmp(key, "global_hpf") == 0) return snprintf(buf, buf_len, "%.3f", e->global_hpf);
-    if (strcmp(key, "global_lpf") == 0) return snprintf(buf, buf_len, "%.3f", e->global_lpf);
+    if (strcmp(key, "dj_filter") == 0) return snprintf(buf, buf_len, "%.3f", e->dj_filter);
+    if (strcmp(key, "tilt_eq") == 0) return snprintf(buf, buf_len, "%.3f", e->tilt_eq);
     if (strcmp(key, "dry_wet") == 0) return snprintf(buf, buf_len, "%.3f", e->dry_wet);
-    if (strcmp(key, "eq_bump_freq") == 0) return snprintf(buf, buf_len, "%.3f", e->eq_bump_freq);
+    if (strcmp(key, "repeat_rate") == 0) return snprintf(buf, buf_len, "%.3f", e->repeat_rate);
+    if (strcmp(key, "repeat_speed") == 0) return snprintf(buf, buf_len, "%.3f", e->repeat_speed);
     if (strcmp(key, "bpm") == 0) return snprintf(buf, buf_len, "%.1f", e->bpm);
     if (strcmp(key, "bypass") == 0) return snprintf(buf, buf_len, "%d", e->bypassed);
     if (strcmp(key, "pressure_curve") == 0) return snprintf(buf, buf_len, "%d", e->pressure_curve);
@@ -327,39 +315,13 @@ static int fx_get_param(void *instance, const char *key, char *buf, int buf_len)
         int slot = atoi(key + 15);
         if (slot < 0 || slot >= PFX_NUM_FX) return -1;
         int n = snprintf(buf, buf_len, "[");
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < PFX_SLOT_PARAMS; i++) {
             SAFE_SNPRINTF(buf, n, buf_len, "%s\"%s\"", i ? "," : "",
                          FX_PARAM_NAMES[slot][i]);
         }
         SAFE_SNPRINTF(buf, n, buf_len, "]");
         return n;
     }
-
-    /* Scene populated state */
-    if (strcmp(key, "scene_populated") == 0) {
-        int n = snprintf(buf, buf_len, "[");
-        for (int i = 0; i < PFX_NUM_SCENES; i++) {
-            SAFE_SNPRINTF(buf, n, buf_len, "%s%d", i ? "," : "", e->scenes[i].populated);
-        }
-        SAFE_SNPRINTF(buf, n, buf_len, "]");
-        return n;
-    }
-
-    /* Step preset populated state */
-    if (strcmp(key, "step_populated") == 0) {
-        int n = snprintf(buf, buf_len, "[");
-        for (int i = 0; i < PFX_NUM_PRESETS; i++) {
-            SAFE_SNPRINTF(buf, n, buf_len, "%s%d", i ? "," : "",
-                          e->step_presets[i].populated);
-        }
-        SAFE_SNPRINTF(buf, n, buf_len, "]");
-        return n;
-    }
-
-    if (strcmp(key, "current_step") == 0)
-        return snprintf(buf, buf_len, "%d", e->current_step_preset);
-    if (strcmp(key, "step_seq_active") == 0)
-        return snprintf(buf, buf_len, "%d", e->step_seq_active);
 
     /* Full state */
     if (strcmp(key, "state") == 0)

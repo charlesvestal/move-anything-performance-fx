@@ -114,6 +114,7 @@ cat src/ui.js > dist/performance-fx/ui.js
 [ -f src/help.json ] && cat src/help.json > dist/performance-fx/help.json
 cat build/dsp.so > dist/performance-fx/dsp.so
 chmod +x dist/performance-fx/dsp.so
+[ -f src/assets/vinyl_crackle.wav ] && cat src/assets/vinyl_crackle.wav > dist/performance-fx/vinyl_crackle.wav
 
 # Create tarball for release
 cd dist

@@ -47,13 +47,9 @@ static inline float pressure_relative(float pressure, float initial,
 #define PFX_REPEAT_BUF      (PFX_SAMPLE_RATE * 2)   /* 2 seconds per repeat slot */
 #define PFX_CAPTURE_BUF     (PFX_SAMPLE_RATE * 4)   /* 4 seconds shared capture */
 #define PFX_CHORUS_BUF      (PFX_SAMPLE_RATE * 1)   /* 1 second for chorus/flanger */
-#define PFX_REVERB_COMB_MAX 4096
-#define PFX_REVERB_AP_MAX   1024
 #define PFX_NUM_FX          32
-#define PFX_NUM_SCENES      16
-#define PFX_NUM_PRESETS     16
-#define PFX_SLOT_PARAMS     4   /* params per FX slot (E1-E4) */
-#define PFX_NUM_GLOBALS     4   /* global params (E5-E8) */
+#define PFX_SLOT_PARAMS     3   /* params per FX slot (E1-E3) */
+#define PFX_NUM_GLOBALS     5   /* global params: DJ Filter, Lo EQ, Hi EQ, Exciter, D/W */
 #define PFX_NUM_ALLPASS     6   /* phaser stages */
 
 /* ---- Pressure curve modes ---- */
@@ -86,31 +82,31 @@ enum {
     FX_AUTO_FILTER,
 
     /* Row 2: Space Throws (pads 76-83 -> slots 16-23) */
-    FX_DELAY,
-    FX_PING_PONG,
-    FX_TAPE_ECHO,
-    FX_ECHO_FREEZE,
-    FX_REVERB,
-    FX_SHIMMER,
-    FX_DARK_VERB,
-    FX_SPRING,
+    FX_DELAY,           /* Quarter note delay */
+    FX_DELAY_DOT8,      /* Dotted 8th delay */
+    FX_PING_PONG,       /* Quarter note ping pong */
+    FX_PING_PONG_DOT8,  /* Dotted 8th ping pong */
+    FX_REVERB,          /* Room reverb */
+    FX_HALL,            /* Hall reverb */
+    FX_DARK_VERB,       /* Dark verb */
+    FX_SPRING,          /* Spring reverb */
 
     /* Row 1: Distortion & Rhythm (pads 68-75 -> slots 24-31) */
     FX_BITCRUSH,
     FX_DOWNSAMPLE,
-    FX_TAPE_STOP,
-    FX_VINYL_BRAKE,
     FX_SATURATE,
     FX_GATE_DUCK,
     FX_TREMOLO,
-    FX_CHORUS
+    FX_PITCH_DOWN,
+    FX_VINYL_SIM,
+    FX_TAPE_STOP
 };
 
 /* ---- FX category helpers ---- */
 #define FX_IS_REPEAT(s)  ((s) >= FX_RPT_1_4 && (s) <= FX_HALF_SPEED)
 #define FX_IS_FILTER(s)  ((s) >= FX_LP_SWEEP_DOWN && (s) <= FX_AUTO_FILTER)
 #define FX_IS_SPACE(s)   ((s) >= FX_DELAY && (s) <= FX_SPRING)
-#define FX_IS_DISTORT(s) ((s) >= FX_BITCRUSH && (s) <= FX_CHORUS)
+#define FX_IS_DISTORT(s) ((s) >= FX_BITCRUSH && (s) <= FX_TAPE_STOP)
 
 /* ---- State Variable Filter ---- */
 typedef struct {
@@ -186,27 +182,7 @@ typedef struct {
     float lfo_phase;
 } mod_delay_t;
 
-/* ---- Reverb (Schroeder) ---- */
-typedef struct {
-    float comb_buf[4][PFX_REVERB_COMB_MAX];
-    int   comb_pos[4];
-    int   comb_len[4];
-    float comb_filt[4];
-    int   comb_pos_r[4];     /* separate read positions for right channel */
-    float comb_filt_r[4];
-    float ap_buf[2][PFX_REVERB_AP_MAX];
-    float ap_buf_r[2][PFX_REVERB_AP_MAX];  /* separate allpass buffers for R */
-    int   ap_pos[2];
-    int   ap_pos_r[2];
-    int   ap_len[2];
-    /* Shimmer pitch shift state */
-    float shimmer_buf[4096];
-    int shimmer_write_pos;
-    float shimmer_read_pos;
-    float damping;
-    float decay;
-    float mix;
-} reverb_t;
+/* Reverb uses pfx_revsc_t (see pfx_revsc.h) — allocated via ext_instance */
 
 /* ---- Ducker ---- */
 typedef struct {
@@ -248,8 +224,7 @@ typedef struct {
 
     /* Space FX (slots 16-23) */
     delay_t delay;
-    reverb_t *reverb;     /* heap allocated — only for reverb slots */
-    int echo_frozen;      /* echo freeze flag */
+    void *ext_instance;   /* pfx_revsc_t* for reverb slots */
 
     /* Distortion FX (slots 24-31) */
     float crush_hold_l, crush_hold_r;
@@ -263,22 +238,6 @@ typedef struct {
     svf_t sat_filter_l;
     svf_t sat_filter_r;
 } pfx_slot_t;
-
-/* ---- Scene snapshot (simplified) ---- */
-typedef struct {
-    int populated;
-    int latched[PFX_NUM_FX];
-    float params[PFX_NUM_FX][PFX_SLOT_PARAMS];
-    float globals[PFX_NUM_GLOBALS];
-} pfx_scene_t;
-
-/* ---- Step chain preset ---- */
-typedef struct {
-    int populated;
-    int latched[PFX_NUM_FX];
-    float params[PFX_NUM_FX][PFX_SLOT_PARAMS];
-    float globals[PFX_NUM_GLOBALS];
-} pfx_step_preset_t;
 
 /* ---- Audio source modes ---- */
 enum {
@@ -294,16 +253,20 @@ enum {
 
 /* ---- Main engine ---- */
 typedef struct {
-    /* Global parameters (E5-E8) */
-    float global_hpf;       /* 0..1, default 0 = off */
-    float global_lpf;       /* 0..1, default 1 = open */
+    /* Global parameters (E6-E8: DJ Filter, Tilt EQ, D/W) */
+    float dj_filter;        /* 0..1, default 0.5 = off; <0.5 = LPF, >0.5 = HPF */
+    float tilt_eq;          /* 0..1, default 0.5 = flat; <0.5 = bass, >0.5 = treble */
     float dry_wet;          /* 0..1, default 1 = full wet */
-    float eq_bump_freq;     /* 0..1, default 0.5 = centered */
+
+    /* Repeat controls (E4-E6, global — applies to active repeat slot) */
+    float repeat_rate;      /* 0..1, default 0.5; maps to beat division */
+    float repeat_speed;     /* 0..1, default 0.5 = normal; 0=stop, 1=2x */
 
     /* Global filters (stereo pairs) */
     svf_t global_lp_l, global_lp_r;
     svf_t global_hp_l, global_hp_r;
-    svf_t eq_bump_l, eq_bump_r;
+    svf_t tilt_lp_l, tilt_lp_r;    /* Tilt EQ low shelf */
+    svf_t tilt_hp_l, tilt_hp_r;    /* Tilt EQ high shelf */
 
     /* Tempo */
     float bpm;
@@ -328,17 +291,6 @@ typedef struct {
 
     /* Last touched slot for E1-E4 mapping */
     int last_touched_slot;
-
-    /* Scenes and step presets */
-    pfx_scene_t scenes[PFX_NUM_SCENES];
-    pfx_step_preset_t step_presets[PFX_NUM_PRESETS];
-    int current_step_preset;
-
-    /* Step FX sequencer */
-    int step_seq_active;
-    int step_seq_pos;
-    float step_seq_phase;
-    int step_seq_division;
 
     /* Shared capture buffer for repeat/reverse/half-speed/scatter */
     float *capture_buf_l;
@@ -370,15 +322,22 @@ typedef struct {
     /* Log callback (set by plugin wrapper) */
     void (*log_fn)(const char *msg);
 
+    /* Vinyl crackle sample (loaded from WAV file) */
+    int16_t *vinyl_crackle_buf;
+    int vinyl_crackle_len;       /* total samples */
+    int vinyl_crackle_pos;       /* playback position */
+
     /* Diagnostic: dump first N samples after activation for debugging */
     int diag_dump_countdown;     /* frames left to dump after activation */
     int diag_slot;               /* which slot triggered the dump */
+
 } perf_fx_engine_t;
 
 /* ---- API ---- */
 void pfx_engine_init(perf_fx_engine_t *e);
 void pfx_engine_destroy(perf_fx_engine_t *e);
 void pfx_engine_reset(perf_fx_engine_t *e);
+void pfx_engine_load_vinyl_crackle(perf_fx_engine_t *e, const char *wav_path);
 
 /* Process one block (128 frames). Reads from host audio, writes to out_lr */
 void pfx_engine_render(perf_fx_engine_t *e, int16_t *out_lr, int frames);
@@ -389,16 +348,6 @@ void pfx_deactivate(perf_fx_engine_t *e, int slot);
 void pfx_set_pressure(perf_fx_engine_t *e, int slot, float pressure);
 void pfx_set_param(perf_fx_engine_t *e, int slot, int idx, float val);
 void pfx_set_latched(perf_fx_engine_t *e, int slot, int latched);
-
-/* Scene management */
-void pfx_scene_save(perf_fx_engine_t *e, int slot);
-void pfx_scene_recall(perf_fx_engine_t *e, int slot);
-void pfx_scene_clear(perf_fx_engine_t *e, int slot);
-
-/* Step preset management */
-void pfx_step_save(perf_fx_engine_t *e, int slot);
-void pfx_step_recall(perf_fx_engine_t *e, int slot);
-void pfx_step_clear(perf_fx_engine_t *e, int slot);
 
 /* State serialization */
 int pfx_serialize_state(perf_fx_engine_t *e, char *buf, int buf_len);

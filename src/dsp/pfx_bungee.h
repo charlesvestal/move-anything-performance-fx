@@ -20,6 +20,9 @@ void pfx_bungee_destroy(pfx_bungee_t *b);
 /* Set playback speed (0.5 = half speed, 1.0 = normal). Pitch is preserved. */
 void pfx_bungee_set_speed(pfx_bungee_t *b, float speed);
 
+/* Set pitch ratio (0.5 = -1 octave, 2.0 = +1 octave). Speed is preserved. */
+void pfx_bungee_set_pitch(pfx_bungee_t *b, float pitch);
+
 /* Reset the stretcher (call when activating the effect). */
 void pfx_bungee_reset(pfx_bungee_t *b);
 
