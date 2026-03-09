@@ -4,7 +4,7 @@
     "abbrev": "PFX",
     "version": "0.0.1",
     "description": "32 punch-in audio FX with pressure control, shift+latch, animated sweeps, scenes and step presets",
-    "author": "chaolue",
+    "author": "charlesvestal",
     "ui": "ui.js",
     "dsp": "dsp.so",
     "api_version": 2,
