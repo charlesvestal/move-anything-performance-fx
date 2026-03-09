@@ -10,6 +10,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -49,6 +50,16 @@ static inline float white_noise(unsigned int *seed) {
 static inline float flush_denormal(float x) {
     union { float f; uint32_t u; } v = { .f = x };
     return (v.u & 0x7F800000) == 0 ? 0.0f : x;
+}
+
+static void engine_log(perf_fx_engine_t *e, const char *fmt, ...) {
+    if (!e || !e->log_fn) return;
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    e->log_fn(buf);
 }
 
 static inline float cutoff_to_f(float cutoff01) {
@@ -268,7 +279,10 @@ void pfx_engine_init(perf_fx_engine_t *e) {
     e->capture_len = PFX_CAPTURE_BUF;
     e->capture_buf_l = (float *)calloc(PFX_CAPTURE_BUF, sizeof(float));
     e->capture_buf_r = (float *)calloc(PFX_CAPTURE_BUF, sizeof(float));
-    if (!e->capture_buf_l || !e->capture_buf_r) return;
+    if (!e->capture_buf_l || !e->capture_buf_r) {
+        fprintf(stderr, "pfx: FATAL - capture buffer alloc failed\n");
+        return;
+    }
 
     /* Init all 32 slots based on type */
     for (int i = 0; i < PFX_NUM_FX; i++) {
@@ -373,7 +387,13 @@ void pfx_engine_reset(perf_fx_engine_t *e) {
 void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
     if (slot < 0 || slot >= PFX_NUM_FX) return;
     pfx_slot_t *s = &e->slots[slot];
-    s->active = 1;
+
+    /* IMPORTANT: Set up ALL type-specific state BEFORE setting active = 1.
+     * The render thread checks s->active to decide whether to process.
+     * If active is set before repeat state (capturing=1), the render thread
+     * may see active=1 + capturing=0 (stale) and read from garbage positions
+     * in the capture buffer, causing an audible glitch. */
+
     s->fading_out = 0;
     s->tail_active = 0;
     s->tail_silence_count = 0;
@@ -386,15 +406,12 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
     svf_reset(&s->filter_l);
     svf_reset(&s->filter_r);
 
-    /* Type-specific activation */
+    /* Type-specific activation (all BEFORE s->active = 1) */
     if (FX_IS_REPEAT(slot)) {
-        /* Beat repeat: start capturing */
+        /* Beat repeat: pass through audio for one division, then loop.
+         * The capture buffer records live audio continuously, so after
+         * one division passes through, we loop from the capture buffer. */
         if (slot >= FX_RPT_1_4 && slot <= FX_STUTTER) {
-            s->repeat.capturing = 1;
-            s->repeat.frames_captured = 0;
-            s->repeat.read_pos = 0;
-            s->repeat.repeat_pos = 0;
-
             float div;
             switch (slot) {
                 case FX_RPT_1_4:  div = 1.0f; break;
@@ -404,10 +421,13 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
                 case FX_STUTTER:  div = 0.125f; break;
                 default: div = 0.5f;
             }
-            s->repeat.repeat_len = pfx_bpm_to_samples(e->bpm, div);
-            if (s->repeat.repeat_len < 64) s->repeat.repeat_len = 64;
-            if (s->repeat.repeat_len > s->repeat.buf_len)
-                s->repeat.repeat_len = s->repeat.buf_len;
+            int rlen = pfx_bpm_to_samples(e->bpm, div);
+            if (rlen < 64) rlen = 64;
+            if (rlen > e->capture_len) rlen = e->capture_len;
+            s->repeat.repeat_len = rlen;
+            s->repeat.frames_captured = 0;
+            s->repeat.read_pos = 0;
+            s->repeat.capturing = 1;  /* Set LAST so render sees valid state */
         }
 
         /* Scatter */
@@ -426,6 +446,8 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
             }
             s->repeat.repeat_len = len;
             s->repeat.read_pos = len - 1;
+            s->repeat.xfade_pos = 0;
+            s->repeat.xfade_len = 128;
         }
 
         /* Half-speed: copy from capture buffer */
@@ -469,6 +491,11 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
 
     if (FX_IS_DISTORT(slot)) {
         if (slot == FX_TAPE_STOP || slot == FX_VINYL_BRAKE) {
+            /* Clear stale buffer data */
+            if (s->tape.buf_l)
+                memset(s->tape.buf_l, 0, s->tape.buf_len * sizeof(float));
+            if (s->tape.buf_r)
+                memset(s->tape.buf_r, 0, s->tape.buf_len * sizeof(float));
             s->tape.speed = 1.0f;
             s->tape.read_pos = 0.0f;
             s->tape.write_pos = 0;
@@ -497,6 +524,11 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
             svf_reset(&s->sat_filter_r);
         }
     }
+
+    /* Set active LAST (belt-and-suspenders, even though set_param and
+     * process_block are serialized via ioctl). */
+    s->active = 1;
+
 }
 
 void pfx_deactivate(perf_fx_engine_t *e, int slot) {
@@ -660,70 +692,113 @@ void pfx_step_clear(perf_fx_engine_t *e, int slot) {
  * Row 4: Time/Repeat FX processing (slots 0-7)
  * ============================================================ */
 
-/* Pressure mapping for beat repeat: pitch drift on repeats */
+/* Beat repeat: let audio play through for one division (capturing into
+ * the capture buffer naturally), then loop from the capture buffer.
+ * Phase 1 (capturing=1): pass through live audio, count samples
+ * Phase 2 (capturing=0): loop repeat_len samples from capture buffer
+ *
+ * repeat.capturing = 1 during pass-through, 0 during repeat
+ * repeat.frames_captured = samples counted during pass-through
+ * repeat.write_pos = capture buffer position saved when repeat begins
+ * repeat.read_pos = offset within repeat region during playback */
 static void process_beat_repeat(pfx_slot_t *s, int slot, float *l, float *r,
                                  perf_fx_engine_t *e) {
     repeat_t *rp = &s->repeat;
-    float pressure = s->pressure;
-
-    /* Pressure -> pitch drift on repeats */
-    float pitch_drift = 1.0f + pressure * 0.3f; /* up to 30% speed-up */
+    (void)slot;
 
     if (rp->capturing) {
-        rp->buf_l[rp->write_pos] = *l;
-        rp->buf_r[rp->write_pos] = *r;
-        rp->write_pos = (rp->write_pos + 1) % rp->buf_len;
+        /* Phase 1: pass through live audio, count down one division */
+        rp->frames_captured++;
+        if (rp->frames_captured >= rp->repeat_len) {
+            /* Division complete — save current capture position and start looping.
+             * Start a crossfade from live audio into the loop to avoid the
+             * discontinuity between current live audio and the loop start. */
+            rp->capturing = 0;
+            rp->write_pos = (e->capture_write_pos - rp->repeat_len + e->capture_len) % e->capture_len;
+            rp->read_pos = 0;
+            rp->xfade_pos = 0;
+            rp->xfade_len = 64;  /* ~1.5ms crossfade at loop boundaries */
+        }
+        /* Output = live audio (unchanged *l, *r) */
+        return;
+    }
+
+    /* Phase 2: loop from capture buffer */
+    /* Pressure → volume: deadzone ±10% around center (0.4-0.6) = 100%,
+     * below 0.4 scales down to 0%, above 0.6 scales up to 200% */
+    float gain;
+    float p = s->pressure;
+    if (p < 0.4f)
+        gain = p / 0.4f;               /* 0.0→0.4 maps to 0.0→1.0 */
+    else if (p <= 0.6f)
+        gain = 1.0f;                    /* deadzone: constant 100% */
+    else
+        gain = 1.0f + (p - 0.6f) / 0.4f; /* 0.6→1.0 maps to 1.0→2.0 */
+
+    int cap_pos = (rp->write_pos + rp->read_pos) % e->capture_len;
+    float loop_l = e->capture_buf_l[cap_pos] * gain;
+    float loop_r = e->capture_buf_r[cap_pos] * gain;
+
+    /* Crossfade from live to loop at transition and at loop-back points */
+    if (rp->xfade_pos < rp->xfade_len) {
+        float t = (float)rp->xfade_pos / (float)rp->xfade_len;
+        *l = *l * (1.0f - t) + loop_l * t;
+        *r = *r * (1.0f - t) + loop_r * t;
+        rp->xfade_pos++;
+    } else {
+        *l = loop_l;
+        *r = loop_r;
+    }
+
+    rp->read_pos += 1;
+    if (rp->read_pos >= rp->repeat_len) {
+        rp->read_pos = 0;
+        /* Crossfade at loop-back point too */
+        rp->xfade_pos = 0;
+    }
+}
+
+static void process_stutter(pfx_slot_t *s, float *l, float *r,
+                             perf_fx_engine_t *e) {
+    repeat_t *rp = &s->repeat;
+
+    if (rp->capturing) {
+        /* Pass through, count down */
         rp->frames_captured++;
         if (rp->frames_captured >= rp->repeat_len) {
             rp->capturing = 0;
-            rp->read_pos = (rp->write_pos - rp->repeat_len + rp->buf_len) % rp->buf_len;
-            rp->repeat_pos = 0;
+            rp->write_pos = (e->capture_write_pos - rp->repeat_len + e->capture_len) % e->capture_len;
+            rp->read_pos = 0;
+            rp->xfade_pos = 0;
+            rp->xfade_len = 128;
         }
+        return;
     }
 
-    if (!rp->capturing) {
-        *l = rp->buf_l[rp->read_pos];
-        *r = rp->buf_r[rp->read_pos];
-        /* Apply pitch drift via variable read speed */
-        int advance = (int)pitch_drift;
-        if (advance < 1) advance = 1;
-        rp->read_pos = (rp->read_pos + advance) % rp->buf_len;
-        rp->repeat_pos += advance;
-        if (rp->repeat_pos >= rp->repeat_len) {
-            rp->repeat_pos = 0;
-            rp->read_pos = (rp->write_pos - rp->repeat_len + rp->buf_len) % rp->buf_len;
-        }
-    }
-    (void)e;
-}
-
-static void process_stutter(pfx_slot_t *s, float *l, float *r) {
-    repeat_t *rp = &s->repeat;
-    float pressure = s->pressure;
-    int stutter_len = 64 + (int)((1.0f - pressure) * (rp->repeat_len - 64));
+    /* Pressure shrinks stutter length for faster glitchy repeats */
+    int stutter_len = 64 + (int)((1.0f - s->pressure) * (rp->repeat_len - 64));
     if (stutter_len < 64) stutter_len = 64;
+    if (stutter_len > rp->repeat_len) stutter_len = rp->repeat_len;
 
-    if (rp->capturing) {
-        rp->buf_l[rp->write_pos] = *l;
-        rp->buf_r[rp->write_pos] = *r;
-        rp->write_pos = (rp->write_pos + 1) % rp->buf_len;
-        rp->frames_captured++;
-        if (rp->frames_captured >= stutter_len) {
-            rp->capturing = 0;
-            rp->read_pos = (rp->write_pos - stutter_len + rp->buf_len) % rp->buf_len;
-            rp->repeat_pos = 0;
-        }
+    /* Read from capture buffer */
+    int cap_pos = (rp->write_pos + rp->read_pos) % e->capture_len;
+    float loop_l = e->capture_buf_l[cap_pos];
+    float loop_r = e->capture_buf_r[cap_pos];
+
+    if (rp->xfade_pos < rp->xfade_len) {
+        float t = (float)rp->xfade_pos / (float)rp->xfade_len;
+        *l = *l * (1.0f - t) + loop_l * t;
+        *r = *r * (1.0f - t) + loop_r * t;
+        rp->xfade_pos++;
+    } else {
+        *l = loop_l;
+        *r = loop_r;
     }
 
-    if (!rp->capturing) {
-        *l = rp->buf_l[rp->read_pos];
-        *r = rp->buf_r[rp->read_pos];
-        rp->read_pos = (rp->read_pos + 1) % rp->buf_len;
-        rp->repeat_pos++;
-        if (rp->repeat_pos >= stutter_len) {
-            rp->repeat_pos = 0;
-            rp->read_pos = (rp->write_pos - stutter_len + rp->buf_len) % rp->buf_len;
-        }
+    rp->read_pos++;
+    if (rp->read_pos >= stutter_len) {
+        rp->read_pos = 0;
+        rp->xfade_pos = 0;
     }
 }
 
@@ -761,8 +836,19 @@ static void process_reverse(pfx_slot_t *s, float *l, float *r) {
     float speed = 0.5f + s->pressure * 1.5f;
 
     if (rp->read_pos >= 0 && rp->read_pos < rp->repeat_len) {
-        *l = rp->buf_l[rp->read_pos];
-        *r = rp->buf_r[rp->read_pos];
+        float rev_l = rp->buf_l[rp->read_pos];
+        float rev_r = rp->buf_r[rp->read_pos];
+
+        /* Crossfade from live to reverse at start */
+        if (rp->xfade_pos < rp->xfade_len) {
+            float t = (float)rp->xfade_pos / (float)rp->xfade_len;
+            *l = *l * (1.0f - t) + rev_l * t;
+            *r = *r * (1.0f - t) + rev_r * t;
+            rp->xfade_pos++;
+        } else {
+            *l = rev_l;
+            *r = rev_r;
+        }
     }
 
     rp->read_pos -= (int)speed;
@@ -968,7 +1054,9 @@ static void process_delay_throw(pfx_slot_t *s, float *l, float *r, int feeding) 
     /* Pressure adds feedback */
     float fb = base_fb + s->pressure * (0.95f - base_fb);
 
-    int delay_samples = 256 + (int)(time * (d->length - 256));
+    /* Map time 0..1 to ~5ms..1s for musically useful delay range */
+    int max_delay = PFX_SAMPLE_RATE; /* 1 second max */
+    int delay_samples = 256 + (int)(time * (max_delay - 256));
     float dl, dr;
     delay_read(d, delay_samples, &dl, &dr);
 
@@ -994,7 +1082,8 @@ static void process_ping_pong_throw(pfx_slot_t *s, float *l, float *r, int feedi
 
     float fb = base_fb + s->pressure * (0.95f - base_fb);
 
-    int delay_samples = 256 + (int)(time * (d->length - 256));
+    int max_delay = PFX_SAMPLE_RATE;
+    int delay_samples = 256 + (int)(time * (max_delay - 256));
     float dl, dr;
     delay_read(d, delay_samples, &dl, &dr);
 
@@ -1023,8 +1112,9 @@ static void process_tape_echo_throw(pfx_slot_t *s, float *l, float *r, int feedi
     if (s->phase >= 1.0f) s->phase -= 1.0f;
     float mod = sinf(s->phase * 2.0f * M_PI) * wow * 200.0f;
 
-    float delay_samples = 2000.0f + age * (float)(d->length - 4000) + mod;
-    delay_samples = clampf(delay_samples, 100.0f, (float)(d->length - 2));
+    int max_delay = PFX_SAMPLE_RATE; /* 1 second max for tape echo */
+    float delay_samples = 2000.0f + age * (float)(max_delay - 4000) + mod;
+    delay_samples = clampf(delay_samples, 100.0f, (float)(max_delay - 2));
 
     float dl, dr;
     delay_read_interp(d, delay_samples, &dl, &dr);
@@ -1050,7 +1140,8 @@ static void process_echo_freeze(pfx_slot_t *s, float *l, float *r, int feeding) 
     float time = s->params[0];
     float mix = 0.8f;
 
-    int delay_samples = 256 + (int)(time * (d->length - 256));
+    int max_delay = PFX_SAMPLE_RATE;
+    int delay_samples = 256 + (int)(time * (max_delay - 256));
     float dl, dr;
     delay_read(d, delay_samples, &dl, &dr);
 
@@ -1351,7 +1442,7 @@ static void process_slot(perf_fx_engine_t *e, int slot, float *l, float *r,
             process_beat_repeat(s, slot, l, r, e);
             break;
         case FX_STUTTER:
-            process_stutter(s, l, r);
+            process_stutter(s, l, r, e);
             break;
         case FX_SCATTER:
             process_scatter(s, l, r, e);

@@ -312,7 +312,7 @@ function loadState() {
         /* Restore latched FX */
         for (let i = 0; i < NUM_SLOTS; i++) {
             if (fxLatched[i]) {
-                sendParam(`punch_${i}_on`, '100');
+                sendParam(`punch_${i}_on`, '0.700');
                 sendParam(`punch_${i}_latch`, '1');
                 fxActive[i] = true;
                 /* Restore per-slot params */
@@ -608,6 +608,8 @@ function handlePadOn(note, velocity) {
     const slot = NOTE_TO_SLOT[note];
     if (slot === undefined) return;
 
+    const velNorm = (velocity / 127.0).toFixed(3);
+
     if (shiftHeld) {
         /* Shift+hold = latch toggle */
         if (fxLatched[slot]) {
@@ -621,14 +623,14 @@ function handlePadOn(note, velocity) {
             /* Latch on */
             fxLatched[slot] = true;
             fxActive[slot] = true;
-            sendParam(`punch_${slot}_on`, String(velocity));
+            sendParam(`punch_${slot}_on`, velNorm);
             sendParam(`punch_${slot}_latch`, '1');
             showOverlay(FX_NAMES[slot], 'Latched', '');
         }
     } else {
         /* Normal punch-in: hold = on */
         fxActive[slot] = true;
-        sendParam(`punch_${slot}_on`, String(velocity));
+        sendParam(`punch_${slot}_on`, velNorm);
     }
 
     /* Update last touched for E1-E4 focus */
@@ -653,10 +655,19 @@ function handlePadOff(note) {
     refreshPadLED(slot);
 }
 
+let lastPressureTime = 0;
+const PRESSURE_THROTTLE_MS = 30; /* Don't send pressure faster than ~33Hz */
+
 function handleAftertouch(note, pressure) {
     const slot = NOTE_TO_SLOT[note];
     if (slot === undefined) return;
     if (!fxActive[slot]) return;
+
+    /* Throttle pressure updates to avoid flooding the param system.
+     * The DSP plugin also gets aftertouch directly via MIDI. */
+    const now = Date.now();
+    if (now - lastPressureTime < PRESSURE_THROTTLE_MS) return;
+    lastPressureTime = now;
 
     sendParam(`punch_${slot}_pressure`, (pressure / 127.0).toFixed(3));
 }
@@ -919,8 +930,11 @@ globalThis.onMidiMessageInternal = function(data) {
         return;
     }
 
-    /* Channel aftertouch - broadcast to all active punch-ins */
+    /* Channel aftertouch - broadcast to all active punch-ins (throttled) */
     if (status === 0xD0) {
+        const now = Date.now();
+        if (now - lastPressureTime < PRESSURE_THROTTLE_MS) return;
+        lastPressureTime = now;
         for (let i = 0; i < NUM_SLOTS; i++) {
             if (fxActive[i]) {
                 sendParam(`punch_${i}_pressure`, (d1 / 127.0).toFixed(3));

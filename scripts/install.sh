@@ -14,17 +14,20 @@ fi
 
 echo "=== Installing Performance FX Module ==="
 
-# Deploy to Move - tools subdirectory
+# Deploy to Move - overtake subdirectory
 echo "Copying module to Move..."
-ssh ableton@move.local "mkdir -p /data/UserData/move-anything/modules/tools/performance-fx"
-scp -r dist/performance-fx/* ableton@move.local:/data/UserData/move-anything/modules/tools/performance-fx/
+ssh ableton@move.local "mkdir -p /data/UserData/move-anything/modules/overtake/performance-fx"
+scp -r dist/performance-fx/* ableton@move.local:/data/UserData/move-anything/modules/overtake/performance-fx/
+
+# Clean up old tools path if it exists
+ssh ableton@move.local "rm -rf /data/UserData/move-anything/modules/tools/performance-fx" 2>/dev/null || true
 
 # Set permissions so Module Store can update later
 echo "Setting permissions..."
-ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/tools/performance-fx"
+ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/overtake/performance-fx"
 
 echo ""
 echo "=== Install Complete ==="
-echo "Module installed to: /data/UserData/move-anything/modules/tools/performance-fx/"
+echo "Module installed to: /data/UserData/move-anything/modules/overtake/performance-fx/"
 echo ""
 echo "Restart Move Anything to load the new module."

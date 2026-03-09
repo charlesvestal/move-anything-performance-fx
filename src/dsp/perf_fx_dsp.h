@@ -117,6 +117,8 @@ typedef struct {
     int repeat_pos;    /* position within current repeat */
     int capturing;     /* 1 = filling buffer */
     int frames_captured;
+    int xfade_pos;     /* crossfade position (0 = not fading) */
+    int xfade_len;     /* crossfade length in samples */
 } repeat_t;
 
 /* ---- Tape stop / vinyl brake ---- */
@@ -330,6 +332,13 @@ typedef struct {
 
     /* Direct input: if non-NULL, render reads from this instead of mapped_memory */
     int16_t *direct_input;
+
+    /* Log callback (set by plugin wrapper) */
+    void (*log_fn)(const char *msg);
+
+    /* Diagnostic: dump first N samples after activation for debugging */
+    int diag_dump_countdown;     /* frames left to dump after activation */
+    int diag_slot;               /* which slot triggered the dump */
 } perf_fx_engine_t;
 
 /* ---- API ---- */

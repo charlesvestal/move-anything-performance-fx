@@ -116,6 +116,9 @@ static void *fx_create(const char *module_dir, const char *config_json) {
 
     pfx_engine_init(&inst->engine);
 
+    /* Wire up log callback so engine can log diagnostics */
+    inst->engine.log_fn = (g_host && g_host->log) ? g_host->log : NULL;
+
     if (g_host) {
         inst->engine.mapped_memory = g_host->mapped_memory;
         inst->engine.audio_out_offset = g_host->audio_out_offset;
@@ -212,6 +215,14 @@ static void fx_set_param(void *instance, const char *key, const char *val) {
         suffix++;
         if (strcmp(suffix, "on") == 0) {
             pfx_activate(e, slot, fval > 0.0f ? fval : 0.7f);
+            /* Log repeat activation diagnostics */
+            if (slot >= FX_RPT_1_4 && slot <= FX_STUTTER) {
+                pfx_slot_t *s = &e->slots[slot];
+                log_msg("pfx: RPT slot=%d bpm=%.1f repeat_len=%d (%.0fms) capturing=%d",
+                        slot, e->bpm, s->repeat.repeat_len,
+                        (float)s->repeat.repeat_len / 44100.0f * 1000.0f,
+                        s->repeat.capturing);
+            }
         } else if (strcmp(suffix, "off") == 0) {
             pfx_deactivate(e, slot);
         } else if (strcmp(suffix, "pressure") == 0) {
