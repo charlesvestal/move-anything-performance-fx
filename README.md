@@ -31,12 +31,57 @@ Live punch-in audio effects processor for [Move Everything](https://github.com/c
 
 ### FX Layout
 
-| Row | Color  | FX |
-|-----|--------|----|
-| 4 (top) | Orange | RPT 1/4, RPT 1/8, RPT 1/16, RPT Trip, Stutter, Scatter, Reverse, Stretch |
-| 3 | Blue | LP Sweep, HP Sweep, BP Rise, BP Fall, Reso Sweep, Phaser, Flanger, AutoFilter |
-| 2 | Purple | Delay 1/4, Delay D8, PingPong 1/4, PingPong D8, Room, Hall, Dark Verb, Spring |
-| 1 (bottom) | Pink/Green/Yellow | Crush, Downsample, Saturate, Gate, Tremolo, Octave Down, Vinyl, Vinyl Break |
+#### Row 4 — Time/Repeat (Orange)
+
+| Pad | Effect | Description |
+|-----|--------|-------------|
+| 1 | RPT 1/4 | Beat repeat, quarter notes |
+| 2 | RPT 1/8 | Beat repeat, eighth notes |
+| 3 | RPT 1/16 | Beat repeat, sixteenth notes |
+| 4 | RPT TRP | Beat repeat, triplet |
+| 5 | STUTTER | Glitch stutter |
+| 6 | SCATTER | Rhythmic slice rearrangement |
+| 7 | REVERSE | Reverse playback |
+| 8 | STRETCH | Time-stretch slowdown |
+
+#### Row 3 — Filter Sweeps (Blue)
+
+| Pad | Effect | Description |
+|-----|--------|-------------|
+| 1 | LP SWP | Low-pass filter sweep down |
+| 2 | HP SWP | High-pass filter sweep up |
+| 3 | BP RISE | Band-pass filter sweep up |
+| 4 | BP FALL | Band-pass filter sweep down |
+| 5 | RESO SW | Resonant sweep |
+| 6 | PHASER | Phaser |
+| 7 | FLANGER | Flanger |
+| 8 | AUTOFLT | Auto-filter (LFO-swept SVF) |
+
+#### Row 2 — Space/Delay (Purple)
+
+| Pad | Effect | Description |
+|-----|--------|-------------|
+| 1 | DLY 1/4 | Delay, quarter note |
+| 2 | DLY D8 | Delay, dotted eighth |
+| 3 | PP 1/4 | Ping-pong delay, quarter note |
+| 4 | PP D8 | Ping-pong delay, dotted eighth |
+| 5 | ROOM | Room reverb |
+| 6 | HALL | Hall reverb |
+| 7 | DK VERB | Dark reverb |
+| 8 | SPRING | Spring reverb |
+
+#### Row 1 — Distortion/Rhythm (Pink/Green/Yellow)
+
+| Pad | Effect | Description |
+|-----|--------|-------------|
+| 1 | CRUSH | Bit crusher |
+| 2 | DWNSMPL | Sample rate reduction |
+| 3 | SATURATE | Saturation/drive |
+| 4 | GATE | Rhythmic gate |
+| 5 | TREMOLO | Tremolo/autopan |
+| 6 | OCT DN | Octave down pitch shift |
+| 7 | VINYL | Vinyl noise overlay |
+| 8 | VNL BRK | Vinyl brake slowdown |
 
 ### Encoders
 
