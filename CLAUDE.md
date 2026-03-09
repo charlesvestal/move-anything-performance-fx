@@ -4,9 +4,9 @@ Instructions for Claude Code when working with this repository.
 
 ## Project Overview
 
-Performance FX is a live audio effects processor tool module for [Move Anything](https://github.com/charlesvestal/move-anything) on Ableton Move hardware. It provides 32 audio effects (16 momentary punch-in + 16 continuous), scene snapshots, step FX sequencer, and per-track Link Audio processing.
+Performance FX is a live audio effects processor overtake module for [Move Anything](https://github.com/charlesvestal/move-anything) on Ableton Move hardware. It provides 32 pressure-sensitive punch-in audio effects with latching, scene snapshots, and a step FX sequencer.
 
-Accessed via the Tools menu (Shift+Vol+Step13).
+Accessed via the Overtake Modules menu (Shift+Vol+Jog Click).
 
 ## Architecture
 
@@ -39,41 +39,23 @@ These are stable ABI contracts. If the host changes them, both repos must be upd
 
 ### DSP Engine
 
-All 32 effects are implemented in pure C with no external DSP libraries:
+All 32 effects are implemented in C with Bungee (C++ time-stretch library) for the stretch FX:
 
-**Punch-in FX** (momentary, pressure-sensitive):
-- Beat repeats (1/4, 1/8, 1/16, triplet), stutter, scatter, reverse, half-speed
-- LP/HP/BP filter sweeps, resonant peak, bitcrush, sample rate reduce, tape stop, ducker
+**Row 4 — Time/Repeat**: RPT 1/4, RPT 1/8, RPT 1/16, RPT Triplet, Stutter, Scatter, Reverse, Stretch
+**Row 3 — Filter Sweeps**: LP Sweep, HP Sweep, BP Rise, BP Fall, Reso Sweep, Phaser, Flanger, AutoFilter
+**Row 2 — Space/Delay**: Delay 1/4, Delay D8, PingPong 1/4, PingPong D8, Room, Hall, Dark Verb, Spring
+**Row 1 — Distortion/Rhythm**: Crush, Downsample, Saturate, Gate, Tremolo, Octave Down, Vinyl, Vinyl Break
 
-**Continuous FX** (toggled, max 3 simultaneous):
-- Delays: standard, ping-pong, tape echo, granular cloud
-- Reverbs: plate, dark, spring, shimmer
-- Modulation: chorus, phaser, flanger, lo-fi, ring mod
-- Dynamics: compressor, saturator, freeze
-
-Each continuous FX has 8 parameters mapped to the 8 encoders when selected.
-
-### Audio Sources
-
-The module reads audio from three possible sources:
-- **Line In** — Direct from Move's audio input
-- **Move Mix** — Move's main stereo output (from host mapped memory)
-- **Tracks** — Per-track audio via Link Audio shared memory (`/move-track-audio`)
-
-Track source requires Link Audio enabled in the host and the shim writing to the shared memory segment. The plugin gracefully handles the shm being unavailable.
+All FX are punch-in (hold=on, release=off) with pressure sensitivity and Shift+hold latching.
 
 ### UI Module
 
-`ui.js` is a standalone JavaScript module (~1600 lines) following the Move Anything tool module pattern:
+`ui.js` is a standalone JavaScript module following the Move Anything overtake module pattern:
 
 - Exports `init()`, `tick()`, `onMidiMessageInternal()` via `globalThis`
 - Uses shared utilities from `move-anything/src/shared/` (constants, display, input filter)
 - Communicates with DSP via `host_module_set_param()` / `host_module_get_param()`
-- State persistence to `/data/UserData/move-anything/set_state/<uuid>/perf_fx_state.json`
-
-### State Persistence
-
-State auto-saves every ~10 seconds and on exit. Per-set persistence: if a Move set is active, state saves under that set's UUID. Includes all FX states, knob values, 16 scenes, 16 step presets, source/track config, and tempo.
+- Always starts fresh (no state persistence)
 
 ## Build Commands
 
@@ -98,10 +80,10 @@ cc -o test_pfx src/dsp/test_perf_fx.c src/dsp/perf_fx_dsp.c -Isrc/dsp -lm && ./t
 
 ## Key Design Decisions
 
-- **Max 3 continuous FX**: Hardware constraint — more causes audio underruns on the CM4
+- **All punch-in**: Every FX is hold=on, release=off for live performance feel
 - **Pressure curves**: Linear, exponential, and switch modes for punch-in intensity mapping
-- **Scene morphing**: Crossfade between two scenes over ~2 seconds (per-sample interpolation in DSP)
-- **Step FX sequencer**: Advances through populated step presets synced to BPM
+- **Immediate rate changes**: Repeat rate knob takes effect immediately (no waiting for loop quantum)
+- **No state persistence**: Always starts fresh — removed to simplify
 
 ## Release
 
@@ -113,6 +95,5 @@ cc -o test_pfx src/dsp/test_perf_fx.c src/dsp/perf_fx_dsp.c -Isrc/dsp -lm && ./t
 
 ## Host Requirements
 
-- **Minimum host version**: 0.8.0 (for Link Audio track shm support)
-- **Link Audio**: Optional but needed for per-track source mode. Shim writes to `/move-track-audio` shm.
-- The host's `pfx_track_shm.h` and this repo's copy must match.
+- **Minimum host version**: 0.7.10
+- Uses `audio_fx_api_v2` interface (available since early host versions)

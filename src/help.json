@@ -18,7 +18,7 @@
         "3. Press harder = more FX",
         "4. Shift+hold = latch on",
         "5. Turn knobs to tweak",
-        "6. Back = save & exit"
+        "6. Back = exit"
       ]
     },
     {
@@ -30,19 +30,19 @@
         "",
         "Row 4 (orange): Time",
         "  1/4  1/8  1/16  Trip",
-        "  Stut Scat Rev   Half",
+        "  Stut Scat Rev   Strch",
         "",
         "Row 3 (blue): Filters",
         "  LP   HP   BPup BPdn",
         "  Reso Phas Flan Auto",
         "",
         "Row 2 (purple): Space",
-        "  Dly  Ping Tape Frz",
-        "  Verb Shim Dark Sprg",
+        "  Dly  DlyD PP   PPD",
+        "  Room Hall Dark Sprg",
         "",
-        "Row 1 (green): Distort",
-        "  Crsh Down Stop Vinyl",
-        "  Sat  Duck Trem Chor"
+        "Row 1 (mixed): Distort",
+        "  Crsh Down Sat  Gate",
+        "  Trem Oct  Vnyl VnBk"
       ]
     },
     {
@@ -68,15 +68,14 @@
         "Touch any knob to see",
         "what it controls.",
         "",
-        "E1-E4: Last-touched FX",
-        "  (4 params per FX)",
-        "  Hold a pad, turn knobs",
-        "  to shape the sound.",
-        "",
-        "E5: High-pass filter",
-        "E6: Low-pass filter",
-        "E7: Dry/Wet mix",
-        "E8: EQ bump frequency",
+        "E1: Repeat Length",
+        "E2: Repeat Speed",
+        "E3: Repeat On/Off",
+        "  (turn right=on, left=off)",
+        "E4-E6: Per-FX params",
+        "  (last touched pad)",
+        "E7: Tilt EQ",
+        "E8: DJ Filter",
         "",
         "Volume knob: host volume",
         "  (always pass-through)"
@@ -95,7 +94,6 @@
         "Delay: feedback amount",
         "Reverb: decay length",
         "Bitcrush: bit depth",
-        "Tape stop: decel speed",
         "Saturate: drive amount",
         "Tremolo: depth",
         "",
@@ -105,40 +103,32 @@
       ]
     },
     {
-      "title": "Buttons",
+      "title": "Bypass",
       "lines": [
-        "Undo: Bypass all FX",
+        "Undo button: Bypass",
         "  Tap = toggle on/off",
         "",
-        "Jog click: Tap tempo",
-        "  (tap 2+ times)",
-        "Shift+Jog: Fine BPM",
-        "",
-        "Shift+Jog click: cycle",
-        "  audio source",
-        "  Line In > Move Mix >",
-        "  Tracks",
-        "",
-        "Back: Save & exit"
+        "When bypassed, audio",
+        "passes through dry.",
+        "All FX remain in their",
+        "current state but are",
+        "silenced until bypass",
+        "is toggled off."
       ]
     },
     {
-      "title": "Scenes & Steps",
+      "title": "Other Controls",
       "lines": [
-        "16 scene snapshots store",
-        "all FX latch states",
-        "and parameters.",
+        "Jog click: Tap tempo",
+        "  (tap 2+ times)",
         "",
-        "Step buttons (bottom row)",
-        "store FX snapshots.",
+        "Shift+Jog turn:",
+        "  Fine BPM adjustment",
         "",
-        "Tap step: recall preset",
-        "Shift+step: save preset",
+        "Undo: Bypass toggle",
+        "  Tap = bypass on/off",
         "",
-        "STEP SEQUENCER:",
-        "Sequences through your",
-        "step presets in time",
-        "with the tempo."
+        "Back: Exit PFX"
       ]
     },
     {
@@ -158,8 +148,9 @@
         "  natural tail decay",
         "  after release",
         "",
-        "- State auto-saves every",
-        "  10 seconds and on exit"
+        "- Repeat rate knob",
+        "  changes take effect",
+        "  immediately"
       ]
     }
   ]
