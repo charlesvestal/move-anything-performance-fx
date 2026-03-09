@@ -319,6 +319,13 @@ typedef struct {
     int capture_len;
     int capture_write_pos;
 
+    /* Row 4 chain capture buffer — records signal after reverse stage
+     * so repeats/scatter/half-speed process reversed audio when active */
+    float *row4_buf_l;
+    float *row4_buf_r;
+    int row4_buf_len;
+    int row4_write_pos;
+
     /* Working buffers */
     float work_l[PFX_BLOCK_SIZE];
     float work_r[PFX_BLOCK_SIZE];

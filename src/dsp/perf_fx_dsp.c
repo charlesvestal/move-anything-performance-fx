@@ -47,6 +47,40 @@ static inline float white_noise(unsigned int *seed) {
     return (float)(int)(*seed) / 2147483648.0f;
 }
 
+/*
+ * Pressure relative to initial hit, normalized to 0.0–1.0.
+ * Initial hit = 0.5 (center). Pressing harder → 1.0. Lighter → 0.0.
+ * ±0.1 deadzone around initial value stays at 0.5.
+ *
+ * Use this for ALL pressure-driven parameters so the initial tap
+ * always feels "neutral" regardless of how hard you press.
+ */
+static inline float pressure_relative(float pressure, float initial) {
+    float lo = initial - 0.1f;
+    float hi = initial + 0.1f;
+    if (lo < 0.0f) lo = 0.0f;
+    if (hi > 1.0f) hi = 1.0f;
+
+    if (pressure >= lo && pressure <= hi)
+        return 0.5f;  /* deadzone → center */
+    if (pressure > hi) {
+        float range = 1.0f - hi;
+        if (range < 0.01f) return 0.5f;
+        return 0.5f + 0.5f * (pressure - hi) / range;  /* 0.5→1.0 */
+    }
+    /* pressure < lo */
+    if (lo < 0.01f) return 0.5f;
+    return 0.5f * pressure / lo;  /* 0.0→0.5 */
+}
+
+/*
+ * Pressure-relative volume gain (convenience wrapper).
+ * Center (0.5) = 1.0x, max (1.0) = 2.0x, min (0.0) = 0.0x.
+ */
+static inline float pressure_volume_gain(float pressure, float initial) {
+    return pressure_relative(pressure, initial) * 2.0f;
+}
+
 static inline float flush_denormal(float x) {
     union { float f; uint32_t u; } v = { .f = x };
     return (v.u & 0x7F800000) == 0 ? 0.0f : x;
@@ -284,6 +318,12 @@ void pfx_engine_init(perf_fx_engine_t *e) {
         return;
     }
 
+    /* Row 4 chain buffer — same size as capture buffer */
+    e->row4_buf_len = PFX_CAPTURE_BUF;
+    e->row4_buf_l = (float *)calloc(PFX_CAPTURE_BUF, sizeof(float));
+    e->row4_buf_r = (float *)calloc(PFX_CAPTURE_BUF, sizeof(float));
+    e->row4_write_pos = 0;
+
     /* Init all 32 slots based on type */
     for (int i = 0; i < PFX_NUM_FX; i++) {
         pfx_slot_t *s = &e->slots[i];
@@ -337,6 +377,8 @@ void pfx_engine_init(perf_fx_engine_t *e) {
 void pfx_engine_destroy(perf_fx_engine_t *e) {
     free(e->capture_buf_l);
     free(e->capture_buf_r);
+    free(e->row4_buf_l);
+    free(e->row4_buf_r);
 
     for (int i = 0; i < PFX_NUM_FX; i++) {
         pfx_slot_t *s = &e->slots[i];
@@ -437,29 +479,32 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
             s->repeat.frames_captured = 0;
         }
 
-        /* Reverse: copy from capture buffer */
+        /* Reverse: copy last bar from capture buffer, play backwards */
         if (slot == FX_REVERSE) {
-            int len = PFX_SAMPLE_RATE;
-            if (len > s->repeat.buf_len) len = s->repeat.buf_len;
-            for (int i = 0; i < len; i++) {
-                int src = (e->capture_write_pos - len + i + e->capture_len) % e->capture_len;
+            int bar_len = pfx_bpm_to_samples(e->bpm, 4.0f); /* 1 bar = 4 beats */
+            if (bar_len > s->repeat.buf_len) bar_len = s->repeat.buf_len;
+            if (bar_len > e->capture_len) bar_len = e->capture_len;
+            if (bar_len < 128) bar_len = 128;
+            for (int i = 0; i < bar_len; i++) {
+                int src = (e->capture_write_pos - bar_len + i + e->capture_len) % e->capture_len;
                 s->repeat.buf_l[i] = e->capture_buf_l[src];
                 s->repeat.buf_r[i] = e->capture_buf_r[src];
             }
-            s->repeat.repeat_len = len;
-            s->repeat.read_pos = len - 1;
+            s->repeat.repeat_len = bar_len;
+            s->repeat.read_pos = bar_len - 1;
             s->repeat.xfade_pos = 0;
             s->repeat.xfade_len = 128;
         }
 
-        /* Half-speed: copy from capture buffer */
+        /* Half-speed: copy from row4 buffer (post-reverse signal) */
         if (slot == FX_HALF_SPEED) {
             int len = PFX_SAMPLE_RATE * 2;
             if (len > s->tape.buf_len) len = s->tape.buf_len;
+            if (len > e->row4_buf_len) len = e->row4_buf_len;
             for (int i = 0; i < len; i++) {
-                int src = (e->capture_write_pos - len + i + e->capture_len) % e->capture_len;
-                s->tape.buf_l[i] = e->capture_buf_l[src];
-                s->tape.buf_r[i] = e->capture_buf_r[src];
+                int src = (e->row4_write_pos - len + i + e->row4_buf_len) % e->row4_buf_len;
+                s->tape.buf_l[i] = e->row4_buf_l[src];
+                s->tape.buf_r[i] = e->row4_buf_r[src];
             }
             s->tape.read_pos = 0.0f;
             s->tape.speed = 0.5f;
@@ -716,7 +761,7 @@ static void process_beat_repeat(pfx_slot_t *s, int slot, float *l, float *r,
              * Start a crossfade from live audio into the loop to avoid the
              * discontinuity between current live audio and the loop start. */
             rp->capturing = 0;
-            rp->write_pos = (e->capture_write_pos - rp->repeat_len + e->capture_len) % e->capture_len;
+            rp->write_pos = (e->row4_write_pos - rp->repeat_len + e->row4_buf_len) % e->row4_buf_len;
             rp->read_pos = 0;
             rp->xfade_pos = 0;
             rp->xfade_len = 64;  /* ~1.5ms crossfade at loop boundaries */
@@ -725,23 +770,15 @@ static void process_beat_repeat(pfx_slot_t *s, int slot, float *l, float *r,
         return;
     }
 
-    /* Phase 2: loop from capture buffer */
-    /* Pressure → volume: deadzone ±10% around center (0.4-0.6) = 100%,
-     * below 0.4 scales down to 0%, above 0.6 scales up to 200% */
-    float gain;
-    float p = s->pressure;
-    if (p < 0.4f)
-        gain = p / 0.4f;               /* 0.0→0.4 maps to 0.0→1.0 */
-    else if (p <= 0.6f)
-        gain = 1.0f;                    /* deadzone: constant 100% */
-    else
-        gain = 1.0f + (p - 0.6f) / 0.4f; /* 0.6→1.0 maps to 1.0→2.0 */
+    /* Phase 2: loop from row4 buffer (post-reverse signal) */
+    float gain = pressure_volume_gain(s->pressure, s->velocity);
 
-    int cap_pos = (rp->write_pos + rp->read_pos) % e->capture_len;
-    float loop_l = e->capture_buf_l[cap_pos] * gain;
-    float loop_r = e->capture_buf_r[cap_pos] * gain;
+    int cap_pos = (rp->write_pos + rp->read_pos) % e->row4_buf_len;
+    float loop_l = e->row4_buf_l[cap_pos] * gain;
+    float loop_r = e->row4_buf_r[cap_pos] * gain;
 
-    /* Crossfade from live to loop at transition and at loop-back points */
+    /* Crossfade from live to loop at initial transition only.
+     * Skip crossfade at loop-back points (xfade_len=0 after first). */
     if (rp->xfade_pos < rp->xfade_len) {
         float t = (float)rp->xfade_pos / (float)rp->xfade_len;
         *l = *l * (1.0f - t) + loop_l * t;
@@ -755,8 +792,6 @@ static void process_beat_repeat(pfx_slot_t *s, int slot, float *l, float *r,
     rp->read_pos += 1;
     if (rp->read_pos >= rp->repeat_len) {
         rp->read_pos = 0;
-        /* Crossfade at loop-back point too */
-        rp->xfade_pos = 0;
     }
 }
 
@@ -769,7 +804,7 @@ static void process_stutter(pfx_slot_t *s, float *l, float *r,
         rp->frames_captured++;
         if (rp->frames_captured >= rp->repeat_len) {
             rp->capturing = 0;
-            rp->write_pos = (e->capture_write_pos - rp->repeat_len + e->capture_len) % e->capture_len;
+            rp->write_pos = (e->row4_write_pos - rp->repeat_len + e->row4_buf_len) % e->row4_buf_len;
             rp->read_pos = 0;
             rp->xfade_pos = 0;
             rp->xfade_len = 128;
@@ -778,14 +813,15 @@ static void process_stutter(pfx_slot_t *s, float *l, float *r,
     }
 
     /* Pressure shrinks stutter length for faster glitchy repeats */
-    int stutter_len = 64 + (int)((1.0f - s->pressure) * (rp->repeat_len - 64));
+    float pr = pressure_relative(s->pressure, s->velocity);
+    int stutter_len = 64 + (int)((1.0f - pr) * (rp->repeat_len - 64));
     if (stutter_len < 64) stutter_len = 64;
     if (stutter_len > rp->repeat_len) stutter_len = rp->repeat_len;
 
-    /* Read from capture buffer */
-    int cap_pos = (rp->write_pos + rp->read_pos) % e->capture_len;
-    float loop_l = e->capture_buf_l[cap_pos];
-    float loop_r = e->capture_buf_r[cap_pos];
+    /* Read from row4 buffer (post-reverse signal) */
+    int cap_pos = (rp->write_pos + rp->read_pos) % e->row4_buf_len;
+    float loop_l = e->row4_buf_l[cap_pos];
+    float loop_r = e->row4_buf_r[cap_pos];
 
     if (rp->xfade_pos < rp->xfade_len) {
         float t = (float)rp->xfade_pos / (float)rp->xfade_len;
@@ -838,11 +874,11 @@ static void process_scatter(pfx_slot_t *s, float *l, float *r,
     /* Slice length = 1/16th note */
     int slice_len = pfx_bpm_to_samples(e->bpm, 0.25f);
     if (slice_len < 128) slice_len = 128;
-    if (slice_len > e->capture_len / SCATTER_STEPS)
-        slice_len = e->capture_len / SCATTER_STEPS;
+    if (slice_len > e->row4_buf_len / SCATTER_STEPS)
+        slice_len = e->row4_buf_len / SCATTER_STEPS;
 
-    /* Pressure-driven parameters (continuous) */
-    float p = s->pressure;
+    /* Pressure-driven parameters (continuous, relative to initial hit) */
+    float p = pressure_relative(s->pressure, s->velocity);
     float gate_ratio = 1.0f - p * 0.6f;        /* 1.0 → 0.4 */
     float rev_weight = p * 0.5f;                /* 0.0 → 0.5 */
     int gate_len = (int)(slice_len * gate_ratio);
@@ -856,10 +892,10 @@ static void process_scatter(pfx_slot_t *s, float *l, float *r,
         /* Look up which slice index to play from the pattern */
         int slice_idx = scatter_pattern[step];
 
-        /* Base: the most recent 8 slices in the capture buffer */
-        int bar_start = (e->capture_write_pos - SCATTER_STEPS * slice_len
-                        + e->capture_len) % e->capture_len;
-        int slice_start = (bar_start + slice_idx * slice_len) % e->capture_len;
+        /* Base: the most recent 8 slices in the row4 buffer */
+        int bar_start = (e->row4_write_pos - SCATTER_STEPS * slice_len
+                        + e->row4_buf_len) % e->row4_buf_len;
+        int slice_start = (bar_start + slice_idx * slice_len) % e->row4_buf_len;
 
         /* Determine direction */
         int reversed = scatter_is_reversed(step, rev_weight);
@@ -870,7 +906,7 @@ static void process_scatter(pfx_slot_t *s, float *l, float *r,
         rp->capturing = reversed;       /* 0=fwd, 1=rev */
 
         if (reversed)
-            rp->read_pos = (slice_start + slice_len - 1) % e->capture_len;
+            rp->read_pos = (slice_start + slice_len - 1) % e->row4_buf_len;
         else
             rp->read_pos = slice_start;
 
@@ -880,9 +916,9 @@ static void process_scatter(pfx_slot_t *s, float *l, float *r,
     }
 
     if (rp->frames_captured < rp->repeat_len) {
-        /* Audible portion — read from capture buffer */
-        float samp_l = e->capture_buf_l[rp->read_pos];
-        float samp_r = e->capture_buf_r[rp->read_pos];
+        /* Audible portion — read from row4 buffer */
+        float samp_l = e->row4_buf_l[rp->read_pos];
+        float samp_r = e->row4_buf_r[rp->read_pos];
 
         /* Crossfade at slice start */
         if (rp->xfade_pos < rp->xfade_len) {
@@ -897,9 +933,9 @@ static void process_scatter(pfx_slot_t *s, float *l, float *r,
 
         /* Advance read position */
         if (rp->capturing)
-            rp->read_pos = (rp->read_pos - 1 + e->capture_len) % e->capture_len;
+            rp->read_pos = (rp->read_pos - 1 + e->row4_buf_len) % e->row4_buf_len;
         else
-            rp->read_pos = (rp->read_pos + 1) % e->capture_len;
+            rp->read_pos = (rp->read_pos + 1) % e->row4_buf_len;
     } else {
         /* Silent gate portion */
         *l = 0.0f;
@@ -910,13 +946,16 @@ static void process_scatter(pfx_slot_t *s, float *l, float *r,
     rp->repeat_pos--;
 }
 
-static void process_reverse(pfx_slot_t *s, float *l, float *r) {
+static void process_reverse(pfx_slot_t *s, float *l, float *r,
+                             perf_fx_engine_t *e) {
     repeat_t *rp = &s->repeat;
-    float speed = 0.5f + s->pressure * 1.5f;
+
+    /* Pressure → volume (relative to initial hit) */
+    float gain = pressure_volume_gain(s->pressure, s->velocity);
 
     if (rp->read_pos >= 0 && rp->read_pos < rp->repeat_len) {
-        float rev_l = rp->buf_l[rp->read_pos];
-        float rev_r = rp->buf_r[rp->read_pos];
+        float rev_l = rp->buf_l[rp->read_pos] * gain;
+        float rev_r = rp->buf_r[rp->read_pos] * gain;
 
         /* Crossfade from live to reverse at start */
         if (rp->xfade_pos < rp->xfade_len) {
@@ -930,13 +969,31 @@ static void process_reverse(pfx_slot_t *s, float *l, float *r) {
         }
     }
 
-    rp->read_pos -= (int)speed;
-    if (rp->read_pos < 0) rp->read_pos = rp->repeat_len - 1;
+    rp->read_pos--;
+    if (rp->read_pos < 0) {
+        /* Reached the start — re-capture the latest bar and loop */
+        int bar_len = pfx_bpm_to_samples(e->bpm, 4.0f);
+        if (bar_len > rp->buf_len) bar_len = rp->buf_len;
+        if (bar_len > e->capture_len) bar_len = e->capture_len;
+        if (bar_len < 128) bar_len = 128;
+        for (int i = 0; i < bar_len; i++) {
+            int src = (e->capture_write_pos - bar_len + i + e->capture_len) % e->capture_len;
+            rp->buf_l[i] = e->capture_buf_l[src];
+            rp->buf_r[i] = e->capture_buf_r[src];
+        }
+        rp->repeat_len = bar_len;
+        rp->read_pos = bar_len - 1;
+        rp->xfade_pos = 0;
+        rp->xfade_len = 128;
+    }
 }
 
 static void process_half_speed(pfx_slot_t *s, float *l, float *r) {
     tape_stop_t *t = &s->tape;
-    float speed = 0.3f + (1.0f - s->pressure) * 0.7f;
+    /* Default = half speed. Pressure harder → slower (down to ~0.1x),
+     * lighter → faster (up to 1.0x) */
+    float pr = pressure_relative(s->pressure, s->velocity);
+    float speed = 0.1f + (1.0f - pr) * 0.9f;  /* 1.0 at min, 0.55 at center, 0.1 at max */
 
     int pos0 = (int)t->read_pos;
     int pos1 = (pos0 + 1) % t->buf_len;
@@ -961,22 +1018,23 @@ static void advance_filter_phase(pfx_slot_t *s, int slot) {
     /* Base sweep speed: complete sweep in ~2 seconds */
     float base_rate = 1.0f / (2.0f * PFX_SAMPLE_RATE);
 
+    float pr = pressure_relative(s->pressure, s->velocity);
     switch (slot) {
         case FX_LP_SWEEP_DOWN:
         case FX_HP_SWEEP_UP:
             /* Pressure -> sweep speed (harder = faster) */
-            base_rate *= (0.5f + s->pressure * 3.0f);
+            base_rate *= (0.5f + pr * 3.0f);
             break;
         case FX_BP_RISE:
         case FX_BP_FALL:
         case FX_RESO_SWEEP:
         case FX_AUTO_FILTER:
-            base_rate *= (0.5f + s->pressure * 2.0f);
+            base_rate *= (0.5f + pr * 2.0f);
             break;
         case FX_PHASER:
         case FX_FLANGER:
             /* Pressure -> LFO speed */
-            base_rate *= (0.3f + s->pressure * 4.0f);
+            base_rate *= (0.3f + pr * 4.0f);
             break;
         default:
             break;
@@ -1040,7 +1098,8 @@ static void process_reso_sweep(pfx_slot_t *s, float *l, float *r) {
     /* High resonance sweep: cutoff sweeps up with phase */
     float cutoff = 0.15f + s->phase * 0.6f;
     float f = cutoff_to_f(cutoff);
-    float q = 0.05f + (1.0f - s->pressure) * 0.03f; /* very high Q, pressure tightens */
+    float pr_q = pressure_relative(s->pressure, s->velocity);
+    float q = 0.05f + (1.0f - pr_q) * 0.03f; /* very high Q, pressure tightens */
     float out_l, out_r;
     svf_process(&s->filter_l, *l, f, q, NULL, NULL, &out_l);
     svf_process(&s->filter_r, *r, f, q, NULL, NULL, &out_r);
@@ -1131,7 +1190,7 @@ static void process_delay_throw(pfx_slot_t *s, float *l, float *r, int feeding) 
     float mix = 0.7f; /* dramatic on tap */
 
     /* Pressure adds feedback */
-    float fb = base_fb + s->pressure * (0.95f - base_fb);
+    float fb = base_fb + pressure_relative(s->pressure, s->velocity) * (0.95f - base_fb);
 
     /* Map time 0..1 to ~5ms..1s for musically useful delay range */
     int max_delay = PFX_SAMPLE_RATE; /* 1 second max */
@@ -1159,7 +1218,7 @@ static void process_ping_pong_throw(pfx_slot_t *s, float *l, float *r, int feedi
     float spread = s->params[2];
     float mix = 0.7f;
 
-    float fb = base_fb + s->pressure * (0.95f - base_fb);
+    float fb = base_fb + pressure_relative(s->pressure, s->velocity) * (0.95f - base_fb);
 
     int max_delay = PFX_SAMPLE_RATE;
     int delay_samples = 256 + (int)(time * (max_delay - 256));
@@ -1184,7 +1243,7 @@ static void process_tape_echo_throw(pfx_slot_t *s, float *l, float *r, int feedi
     float base_fb = s->params[2] * 0.75f;
     float mix = 0.7f;
 
-    float fb = base_fb + s->pressure * (0.9f - base_fb);
+    float fb = base_fb + pressure_relative(s->pressure, s->velocity) * (0.9f - base_fb);
 
     /* Wow/flutter modulation */
     s->phase += 0.5f / PFX_SAMPLE_RATE;
@@ -1233,7 +1292,7 @@ static void process_echo_freeze(pfx_slot_t *s, float *l, float *r, int feeding) 
     }
 
     /* Pressure freezes the echo */
-    s->echo_frozen = (s->pressure > 0.5f) ? 1 : 0;
+    s->echo_frozen = (pressure_relative(s->pressure, s->velocity) > 0.7f) ? 1 : 0;
 
     *l = *l * (1.0f - mix) + dl * mix;
     *r = *r * (1.0f - mix) + dr * mix;
@@ -1250,7 +1309,7 @@ static void process_reverb_throw(pfx_slot_t *s, float *l, float *r,
     float mod = s->params[2];
 
     /* Pressure -> decay time */
-    float decay = base_decay + s->pressure * (0.98f - base_decay);
+    float decay = base_decay + pressure_relative(s->pressure, s->velocity) * (0.98f - base_decay);
 
     switch (slot) {
         case FX_REVERB:
@@ -1311,7 +1370,7 @@ static void process_reverb_throw(pfx_slot_t *s, float *l, float *r,
 /* Pressure -> bit depth (harder = fewer bits) */
 static void process_bitcrush(pfx_slot_t *s, float *l, float *r) {
     /* Zero pressure = 8 bits (dramatic), full pressure = 1 bit */
-    float bits = 8.0f - s->pressure * 7.0f;
+    float bits = 8.0f - pressure_relative(s->pressure, s->velocity) * 7.0f;
     if (bits < 1.0f) bits = 1.0f;
     float levels = powf(2.0f, bits);
     *l = roundf(*l * levels) / levels;
@@ -1321,7 +1380,7 @@ static void process_bitcrush(pfx_slot_t *s, float *l, float *r) {
 /* Pressure -> sample rate reduction */
 static void process_downsample(pfx_slot_t *s, float *l, float *r) {
     /* Zero pressure = period 8 (noticeable), full pressure = period 64 (extreme) */
-    int period = 8 + (int)(s->pressure * 56.0f);
+    int period = 8 + (int)(pressure_relative(s->pressure, s->velocity) * 56.0f);
 
     s->crush_count++;
     if (s->crush_count >= (unsigned int)period) {
@@ -1342,7 +1401,7 @@ static void process_tape_stop(pfx_slot_t *s, float *l, float *r) {
     t->write_pos = (t->write_pos + 1) % t->buf_len;
 
     /* Pressure controls deceleration: more pressure = faster stop */
-    float decel = 0.00005f + s->pressure * 0.0005f;
+    float decel = 0.00005f + pressure_relative(s->pressure, s->velocity) * 0.0005f;
     t->speed -= decel;
     if (t->speed < 0.0f) t->speed = 0.0f;
 
@@ -1369,7 +1428,7 @@ static void process_vinyl_brake(pfx_slot_t *s, float *l, float *r) {
     t->write_pos = (t->write_pos + 1) % t->buf_len;
 
     /* Slower, more gradual stop. Pressure controls speed. */
-    float decel = 0.00002f + s->pressure * 0.0002f;
+    float decel = 0.00002f + pressure_relative(s->pressure, s->velocity) * 0.0002f;
     t->speed -= decel;
     if (t->speed < 0.0f) t->speed = 0.0f;
 
@@ -1398,7 +1457,7 @@ static void process_vinyl_brake(pfx_slot_t *s, float *l, float *r) {
 /* Pressure -> drive amount */
 static void process_saturate(pfx_slot_t *s, float *l, float *r) {
     /* Zero pressure = moderate drive (3x), full pressure = heavy drive (20x) */
-    float drive = 3.0f + s->pressure * 17.0f;
+    float drive = 3.0f + pressure_relative(s->pressure, s->velocity) * 17.0f;
     float tone = s->params[0];
 
     float dry_l = *l, dry_r = *r;
@@ -1425,7 +1484,7 @@ static void process_gate_duck(pfx_slot_t *s, float *l, float *r,
                                perf_fx_engine_t *e) {
     ducker_t *dk = &s->ducker;
     /* Zero pressure = moderate depth (0.5), full pressure = full depth */
-    float depth = 0.5f + s->pressure * 0.5f;
+    float depth = 0.5f + pressure_relative(s->pressure, s->velocity) * 0.5f;
 
     /* Rate from params[0] */
     float rate_param = s->params[0];
@@ -1454,7 +1513,7 @@ static void process_gate_duck(pfx_slot_t *s, float *l, float *r,
 /* Pressure -> LFO speed for tremolo */
 static void process_tremolo(pfx_slot_t *s, float *l, float *r) {
     /* Base rate 2 Hz, pressure goes up to 20 Hz */
-    float rate = 2.0f + s->pressure * 18.0f;
+    float rate = 2.0f + pressure_relative(s->pressure, s->velocity) * 18.0f;
     float depth = 0.5f + s->params[0] * 0.5f;
 
     s->trem_lfo_phase += rate / PFX_SAMPLE_RATE;
@@ -1474,7 +1533,7 @@ static void process_chorus_fx(pfx_slot_t *s, float *l, float *r) {
 
     float rate = 0.5f + s->params[0] * 3.0f;
     /* Zero pressure = moderate depth, full pressure = deep chorus */
-    float depth = (0.002f + s->pressure * 0.008f) * PFX_SAMPLE_RATE;
+    float depth = (0.002f + pressure_relative(s->pressure, s->velocity) * 0.008f) * PFX_SAMPLE_RATE;
     float fb = s->params[1] * 0.5f;
 
     md->lfo_phase += rate / PFX_SAMPLE_RATE;
@@ -1527,7 +1586,7 @@ static void process_slot(perf_fx_engine_t *e, int slot, float *l, float *r,
             process_scatter(s, l, r, e);
             break;
         case FX_REVERSE:
-            process_reverse(s, l, r);
+            process_reverse(s, l, r, e);
             break;
         case FX_HALF_SPEED:
             process_half_speed(s, l, r);
@@ -1615,48 +1674,87 @@ static void process_slot(perf_fx_engine_t *e, int slot, float *l, float *r,
     }
 }
 
+/* Process a single active slot with fade-out and tail handling */
+static void process_active_slot(perf_fx_engine_t *e, int i, float *l, float *r) {
+    pfx_slot_t *s = &e->slots[i];
+
+    int is_active = s->active || s->fading_out;
+    int is_tail = s->tail_active;
+
+    if (!is_active && !is_tail) return;
+
+    float dry_l = *l;
+    float dry_r = *r;
+
+    int feeding = s->active;
+    process_slot(e, i, l, r, feeding);
+
+    /* Apply fade-out crossfade for non-space FX */
+    if (s->fading_out) {
+        float fade = 1.0f - (float)s->fade_pos / (float)s->fade_len;
+        *l = dry_l * (1.0f - fade) + *l * fade;
+        *r = dry_r * (1.0f - fade) + *r * fade;
+        s->fade_pos++;
+        if (s->fade_pos >= s->fade_len) {
+            s->active = 0;
+            s->fading_out = 0;
+        }
+    }
+
+    /* Check tail silence for space FX */
+    if (is_tail && !is_active) {
+        float max_out = fabsf(*l - dry_l);
+        float max_out_r = fabsf(*r - dry_r);
+        if (max_out_r > max_out) max_out = max_out_r;
+        if (max_out < PFX_TAIL_THRESHOLD) {
+            s->tail_silence_count++;
+            if (s->tail_silence_count >= PFX_TAIL_SILENCE_FRAMES) {
+                s->tail_active = 0;
+            }
+        } else {
+            s->tail_silence_count = 0;
+        }
+    }
+}
+
+/*
+ * Row 4 chain: reverse → repeats → scatter → half_speed
+ *
+ * Processed in fixed order so effects chain into each other.
+ * After reverse runs, the signal is written to row4_buf so that
+ * repeats and scatter loop from post-reverse audio.
+ */
+static void process_row4_chain(perf_fx_engine_t *e, float *l, float *r) {
+    /* Stage 1: Reverse */
+    process_active_slot(e, FX_REVERSE, l, r);
+
+    /* Write post-reverse signal to Row 4 capture buffer.
+     * This is what repeats/scatter will loop from. */
+    e->row4_buf_l[e->row4_write_pos] = *l;
+    e->row4_buf_r[e->row4_write_pos] = *r;
+    e->row4_write_pos = (e->row4_write_pos + 1) % e->row4_buf_len;
+
+    /* Stage 2: Beat repeats and stutter */
+    process_active_slot(e, FX_RPT_1_4, l, r);
+    process_active_slot(e, FX_RPT_1_8, l, r);
+    process_active_slot(e, FX_RPT_1_16, l, r);
+    process_active_slot(e, FX_RPT_TRIP, l, r);
+    process_active_slot(e, FX_STUTTER, l, r);
+
+    /* Stage 3: Scatter */
+    process_active_slot(e, FX_SCATTER, l, r);
+
+    /* Stage 4: Half speed */
+    process_active_slot(e, FX_HALF_SPEED, l, r);
+}
+
 static void process_all_slots(perf_fx_engine_t *e, float *l, float *r) {
-    for (int i = 0; i < PFX_NUM_FX; i++) {
-        pfx_slot_t *s = &e->slots[i];
+    /* Row 4 processed as a dedicated chain */
+    process_row4_chain(e, l, r);
 
-        int is_active = s->active || s->fading_out;
-        int is_tail = s->tail_active;
-
-        if (!is_active && !is_tail) continue;
-
-        float dry_l = *l;
-        float dry_r = *r;
-
-        /* Space FX: feeding = active (held or latched), tail = decaying */
-        int feeding = s->active;
-        process_slot(e, i, l, r, feeding);
-
-        /* Apply fade-out crossfade for non-space FX */
-        if (s->fading_out) {
-            float fade = 1.0f - (float)s->fade_pos / (float)s->fade_len;
-            *l = dry_l * (1.0f - fade) + *l * fade;
-            *r = dry_r * (1.0f - fade) + *r * fade;
-            s->fade_pos++;
-            if (s->fade_pos >= s->fade_len) {
-                s->active = 0;
-                s->fading_out = 0;
-            }
-        }
-
-        /* Check tail silence for space FX */
-        if (is_tail && !is_active) {
-            float max_out = fabsf(*l - dry_l);
-            float max_out_r = fabsf(*r - dry_r);
-            if (max_out_r > max_out) max_out = max_out_r;
-            if (max_out < PFX_TAIL_THRESHOLD) {
-                s->tail_silence_count++;
-                if (s->tail_silence_count >= PFX_TAIL_SILENCE_FRAMES) {
-                    s->tail_active = 0;
-                }
-            } else {
-                s->tail_silence_count = 0;
-            }
-        }
+    /* Rows 3, 2, 1 (slots 8-31) */
+    for (int i = FX_LP_SWEEP_DOWN; i < PFX_NUM_FX; i++) {
+        process_active_slot(e, i, l, r);
     }
 }
 
