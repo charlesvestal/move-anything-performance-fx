@@ -34,7 +34,7 @@ static audio_fx_api_v2_t g_fx_api;
 static const char *FX_NAMES[PFX_NUM_FX] = {
     /* Row 4: Time/Repeat (slots 0-7) */
     "RPT 1/4", "RPT 1/8", "RPT 1/16", "RPT Trip",
-    "Stutter", "Scatter", "Reverse", "Half-Speed",
+    "Stutter", "Scatter", "Reverse", "Timestretch",
     /* Row 3: Filter Sweeps (slots 8-15) */
     "LP Sweep", "HP Sweep", "BP Rise", "BP Fall",
     "Reso Sweep", "Phaser", "Flanger", "Auto Filter",
@@ -56,7 +56,7 @@ static const char *FX_PARAM_NAMES[PFX_NUM_FX][4] = {
     {"Length", "Rate", "Pitch", "Mix"},          /* Stutter */
     {"Density", "Range", "Pitch", "Mix"},        /* Scatter */
     {"Speed", "Length", "Pitch", "Mix"},         /* Reverse */
-    {"Speed", "Tone", "Pitch", "Mix"},           /* Half-Speed */
+    {"Speed", "Tone", "Pitch", "Mix"},           /* Timestretch */
     /* Row 3 */
     {"Speed", "Reso", "Depth", "Mix"},           /* LP Sweep */
     {"Speed", "Reso", "Depth", "Mix"},           /* HP Sweep */
@@ -225,7 +225,7 @@ static void fx_set_param(void *instance, const char *key, const char *val) {
             pfx_slot_t *s = &e->slots[slot];
             log_msg("pfx: PRES slot=%d p=%.3f vel=%.3f settle=%d pr=%.3f",
                     slot, s->pressure, s->velocity, s->settle_counter,
-                    pressure_relative(s->pressure, s->velocity));
+                    pressure_relative(s->pressure, s->velocity, s->settle_counter));
         } else if (strcmp(suffix, "latch") == 0) {
             pfx_set_latched(e, slot, ival);
         } else if (strncmp(suffix, "param_", 6) == 0) {

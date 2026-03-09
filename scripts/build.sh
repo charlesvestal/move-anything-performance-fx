@@ -44,19 +44,67 @@ echo "=== Building Performance FX Module ==="
 echo "Cross prefix: $CROSS_PREFIX"
 
 # Create build directories
-mkdir -p build
+mkdir -p build/bungee
 mkdir -p dist/performance-fx
 
-# Compile DSP plugin (with aggressive optimizations for CM4)
+BUNGEE_DIR="src/dsp/bungee"
+
+# Step 1: Build PFFFT (FFT library)
+echo "Building PFFFT..."
+${CROSS_PREFIX}gcc -O3 -fPIC -ffast-math -fno-finite-math-only \
+    -c ${BUNGEE_DIR}/submodules/pffft/pffft.c -o build/bungee/pffft.o
+${CROSS_PREFIX}gcc -O3 -fPIC -ffast-math -fno-finite-math-only \
+    -c ${BUNGEE_DIR}/submodules/pffft/fftpack.c -o build/bungee/fftpack.o
+
+# Step 2: Build Bungee library (C++20)
+echo "Building Bungee..."
+for src in ${BUNGEE_DIR}/src/*.cpp; do
+    obj="build/bungee/$(basename "$src" .cpp).o"
+    ${CROSS_PREFIX}g++ -O3 -fPIC -std=c++20 -fwrapv \
+        -I"${BUNGEE_DIR}/submodules/eigen" \
+        -I"${BUNGEE_DIR}/submodules" \
+        -I"${BUNGEE_DIR}" \
+        '-DBUNGEE_VISIBILITY=__attribute__((visibility("default")))' \
+        -DBUNGEE_SELF_TEST=0 \
+        -Deigen_assert=BUNGEE_ASSERT1 \
+        -DEIGEN_DONT_PARALLELIZE=1 \
+        '-DBUNGEE_VERSION="0.0.0"' \
+        -c "$src" -o "$obj"
+done
+
+# Step 3: Create static archive
+echo "Creating Bungee static library..."
+${CROSS_PREFIX}ar rcs build/bungee/libbungee.a build/bungee/*.o
+
+# Step 4: Build the C++ bungee wrapper
+echo "Compiling Bungee wrapper..."
+${CROSS_PREFIX}g++ -O3 -fPIC -std=c++20 \
+    -I"${BUNGEE_DIR}" \
+    -Isrc/dsp \
+    -c src/dsp/pfx_bungee.cpp -o build/pfx_bungee.o
+
+# Step 5: Compile DSP plugin (C) and link everything
 echo "Compiling DSP plugin..."
-${CROSS_PREFIX}gcc -Ofast -shared -fPIC \
+${CROSS_PREFIX}gcc -Ofast -fPIC \
     -march=armv8-a -mtune=cortex-a72 \
     -fomit-frame-pointer -fno-stack-protector \
     -DNDEBUG \
-    src/dsp/perf_fx_plugin.c \
-    src/dsp/perf_fx_dsp.c \
-    -o build/dsp.so \
-    -Isrc/dsp \
+    -c src/dsp/perf_fx_plugin.c -o build/perf_fx_plugin.o \
+    -Isrc/dsp
+${CROSS_PREFIX}gcc -Ofast -fPIC \
+    -march=armv8-a -mtune=cortex-a72 \
+    -fomit-frame-pointer -fno-stack-protector \
+    -DNDEBUG \
+    -c src/dsp/perf_fx_dsp.c -o build/perf_fx_dsp.o \
+    -Isrc/dsp
+
+# Step 6: Link final shared library (use g++ for C++ runtime)
+echo "Linking..."
+${CROSS_PREFIX}g++ -shared -o build/dsp.so \
+    build/perf_fx_plugin.o \
+    build/perf_fx_dsp.o \
+    build/pfx_bungee.o \
+    build/bungee/libbungee.a \
     -lm -lrt
 
 # Copy files to dist (use cat to avoid ExtFS deallocation issues with Docker)

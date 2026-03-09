@@ -1,0 +1,5 @@
+Name: bungee
+Description: Bungee audio time-stretch and pitch-shift library
+Version: @BUNGEE_VERSION@
+Libs: @PKGCONFIG_LINK_PATH@${pcfiledir}/.. @PKGCONFIG_LINK_FLAG@@BUNGEE_LIBRARY_OUTPUT_NAME@
+Cflags: -I${pcfiledir}/../../include

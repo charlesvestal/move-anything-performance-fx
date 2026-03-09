@@ -1,0 +1,128 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "BUNGEE_SELF_TEST": "0",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "windows-x86_64",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_SYSTEM_NAME": "Windows",
+                "CMAKE_C_COMPILER": "x86_64-w64-mingw32-gcc",
+                "CMAKE_CXX_COMPILER": "x86_64-w64-mingw32-g++",
+                "CMAKE_FIND_ROOT_PATH_MODE_PROGRAM": "NEVER",
+                "CMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY",
+                "CMAKE_EXE_LINKER_FLAGS": "-static-libgcc -static-libstdc++ -static ",
+                "CMAKE_SHARED_LINKER_FLAGS": "-static-libgcc -static-libstdc++ -static",
+                "CMAKE_SHARED_LIBRARY_PREFIX_CXX": "",
+                "CMAKE_IMPORT_LIBRARY_PREFIX_CXX": "",
+                "CMAKE_IMPORT_LIBRARY_SUFFIX_CXX": ".lib"
+            }
+        },
+        {
+            "name": "linux-x86_64",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "linux-aarch64",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "aarch64-linux-gnu-gcc",
+                "CMAKE_CXX_COMPILER": "aarch64-linux-gnu-g++",
+                "CMAKE_STRIP": "aarch64-linux-gnu-strip",
+                "CMAKE_FIND_ROOT_PATH_MODE_PROGRAM": "NEVER",
+                "CMAKE_FIND_ROOT_PATH_MODE_LIBRARY": "ONLY",
+                "CMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY"
+            }
+        },
+        {
+            "name": "android",
+            "hidden": true,
+            "inherits": "base",
+            "toolchainFile": "$env{ANDROID_NDK_LATEST_HOME}/build/cmake/android.toolchain.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "ANDROID_TOOLCHAIN": "clang",
+                "ANDROID_STL": "c++_static",
+                "BUILD_SHARED_LIBS": "false"
+            }
+        },
+        {
+            "name": "android-armeabi-v7a",
+            "inherits": "android",
+            "cacheVariables": {
+                "ANDROID_ABI": "armeabi-v7a",
+                "ANDROID_PLATFORM": "android-16"
+            }
+        },
+        {
+            "name": "android-arm64-v8a",
+            "inherits": "android",
+            "cacheVariables": {
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_PLATFORM": "android-21"
+            }
+        },
+        {
+            "name": "android-x86",
+            "inherits": "android",
+            "cacheVariables": {
+                "ANDROID_ABI": "x86",
+                "ANDROID_PLATFORM": "android-16"
+            }
+        },
+        {
+            "name": "android-x86_64",
+            "inherits": "android",
+            "cacheVariables": {
+                "ANDROID_ABI": "x86_64",
+                "ANDROID_PLATFORM": "android-21"
+            }
+        },
+        {
+            "name": "apple",
+            "hidden": true,
+            "inherits": "base",
+            "generator": "Xcode",
+            "cacheVariables": {
+                "BUNGEE_INSTALL_FRAMEWORK": "ON",
+                "CMAKE_CONFIGURATION_TYPES": "Release",
+                "CMAKE_XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER": "com.parabolaresearch.bungee",
+                "CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED": "NO"
+            }
+        },
+        {
+            "name": "apple-mac",
+            "inherits": "apple",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "Darwin",
+                "CMAKE_OSX_ARCHITECTURES": "x86_64;arm64",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0"
+            }
+        },
+        {
+            "name": "apple-ios",
+            "inherits": "apple",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS"
+            }
+        }
+    ]
+}

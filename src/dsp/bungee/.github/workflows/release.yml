@@ -1,0 +1,105 @@
+name: release
+
+on:
+  push:
+    branches:
+      - '**'
+    tags-ignore:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  build_ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      
+      - name: 🛒 Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+          path: repo
+          
+      - name: 🏷️ Get version information from most recent tag and assign build version
+        working-directory: ${{github.workspace}}/repo
+        run: |
+          BUNGEE_VERSION=$(git describe | sed -E 's/^v//; s/$/.0/; s/-/./g; s/\.g.+//')
+          echo "BUNGEE_VERSION=${BUNGEE_VERSION}" | tee -a $GITHUB_ENV
+          echo "# Ubuntu build ${BUNGEE_VERSION}" | tee -a $GITHUB_STEP_SUMMARY
+  
+      - name: 🛠️ Configure, build and install presets
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
+        working-directory: ${{github.workspace}}/repo
+        run: |
+          sudo apt-get -y install mingw-w64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          ${{github.workspace}}/repo/.github/workflows/release-ubuntu.sh ${BUNGEE_VERSION}
+          echo v${BUNGEE_VERSION} > install/version.txt
+          tar cvzf ${{github.workspace}}/artifact.tgz install
+          cd install
+          echo "## Contents" | tee -a $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" | tee -a $GITHUB_STEP_SUMMARY
+          find . \( -type f -o -type l \) -exec ls -l {} + | tee -a $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" | tee -a $GITHUB_STEP_SUMMARY
+          
+      - name: ✈️ Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu
+          path: ${{github.workspace}}/artifact.tgz
+          retention-days: 1
+
+          
+  build_macos:
+    runs-on: macos-latest
+    needs: build_ubuntu
+    if: github.ref == 'refs/heads/main'
+    steps:
+      
+      - name: 🛒 Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          path: repo
+
+      - name: 🪂 Download artifacts that were built un Ubuntu
+        uses: actions/download-artifact@v4
+
+      - name: 📦Extract Ubuntu artifacts
+        working-directory: ${{github.workspace}}/ubuntu
+        run: |
+          tar xvzf artifact.tgz
+          BUNGEE_VERSION=$(cat install/version.txt | sed 's/^v//')
+          echo "BUNGEE_VERSION=${BUNGEE_VERSION}" | tee -a $GITHUB_ENV
+          echo "# MacOS build ${BUNGEE_VERSION}" | tee -a $GITHUB_STEP_SUMMARY
+
+      - name: 🛠️ Configure, build and install Apple presets
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
+        working-directory: ${{github.workspace}}/repo
+        run: ${{github.workspace}}/repo/.github/workflows/release-apple.sh ${BUNGEE_VERSION} 
+
+      - name: 🗜️ Prepare archives
+        run: |
+          cd ${{github.workspace}}/repo/install 
+          echo "## Contents" | tee -a $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" | tee -a $GITHUB_STEP_SUMMARY
+          find . \( -type f -o -type l \) -exec ls -l {} + | tee -a $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" | tee -a $GITHUB_STEP_SUMMARY
+          cp -R ${{github.workspace}}/ubuntu/install/* .
+          tar cvzf ../../bungee-v${BUNGEE_VERSION}.tgz *
+
+      - name: ⭐ Create release
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          gh release create "v${BUNGEE_VERSION}" \
+              --repo="${{github.repository}}" \
+              --title="Bungee v${BUNGEE_VERSION}" \
+              --notes="" \
+              ${{github.workspace}}/bungee-v${BUNGEE_VERSION}.tgz
+  

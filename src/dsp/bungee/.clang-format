@@ -1,0 +1,44 @@
+---
+Language: Cpp
+
+UseTab: ForContinuationAndIndentation
+ColumnLimit: 0
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+AccessModifierOffset: -4
+IndentCaseLabels: false
+LambdaBodyIndentation: OuterScope
+
+AlignOperands : DontAlign
+AlignAfterOpenBracket: DontAlign
+AlignTrailingComments: false
+AlignEscapedNewlines: DontAlign
+AlignArrayOfStructures: None
+
+AllowShortIfStatementsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: All
+AlwaysBreakBeforeMultilineStrings: true
+
+BreakInheritanceList: AfterColon
+BreakConstructorInitializers: AfterColon
+BreakBeforeBraces: Custom
+
+BraceWrapping:
+  AfterNamespace: false
+  AfterFunction: true
+  AfterStruct: true
+  AfterClass: true
+  AfterEnum: true
+  BeforeElse: true
+  AfterControlStatement: Always
+
+FixNamespaceComments: true
+NamespaceIndentation: None
+
+QualifierAlignment: Custom
+QualifierOrder: ['static', 'inline', 'const', 'constexpr', 'type', 'volatile' ]
+
+IndentPPDirectives: AfterHash 
+
+SkipMacroDefinitionBody: true

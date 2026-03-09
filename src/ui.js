@@ -71,7 +71,7 @@ const TRACK_CCS = [MoveRow1, MoveRow2, MoveRow3, MoveRow4];
 const FX_NAMES = [
     /* Row 4: Time/Repeat */
     'RPT 1/4', 'RPT 1/8', 'RPT 1/16', 'RPT TRP',
-    'STUTTER', 'SCATTER', 'REVERSE', 'HALF-SPD',
+    'STUTTER', 'SCATTER', 'REVERSE', 'STRETCH',
     /* Row 3: Filter Sweeps */
     'LP SWP\u2193', 'HP SWP\u2191', 'BP RISE', 'BP FALL',
     'RESO SW', 'PHASER', 'FLANGER', 'AUTOFLT',
@@ -93,7 +93,7 @@ const FX_PARAM_LABELS = [
     ['Grain', 'Div', 'Decay', 'Filter'],           /* STUTTER */
     ['Grain', 'Div', 'Decay', 'Filter'],           /* SCATTER */
     ['Length', 'Fade', 'Filter', '\u2014'],         /* REVERSE */
-    ['Speed', 'Fade', 'Filter', '\u2014'],         /* HALF-SPD */
+    ['Speed', 'Fade', 'Filter', '\u2014'],         /* STRETCH */
     /* Row 3: filter sweeps */
     ['Speed', 'Range', 'Reso', 'Start'],           /* LP SWP */
     ['Speed', 'Range', 'Reso', 'Start'],           /* HP SWP */
@@ -582,8 +582,41 @@ function drawOverlay() {
  * Parameter handling
  * ================================================================ */
 
+/* ---- Param queue for overtake mode ----
+ * In overtake mode, shadow_set_param is fire-and-forget into a single
+ * shared memory slot. Rapid calls within the same tick clobber each other.
+ * Queue non-critical params and drain them 1 per tick.
+ * Critical params (on/off/latch) use the blocking variant. */
+const paramQueue = [];
+const PARAMS_PER_TICK = 2;  /* drain up to 2 queued params per tick */
+
 function sendParam(key, value) {
-    host_module_set_param(key, String(value));
+    const v = String(value);
+    /* Critical: note on/off/latch must be delivered immediately */
+    if (key.endsWith('_on') || key.endsWith('_off') || key.endsWith('_latch')) {
+        if (typeof host_module_set_param_blocking === 'function') {
+            host_module_set_param_blocking(key, v, 50);
+        } else {
+            host_module_set_param(key, v);
+        }
+        return;
+    }
+    /* Non-critical: queue and deduplicate (keep latest value per key) */
+    const existing = paramQueue.findIndex(p => p[0] === key);
+    if (existing >= 0) {
+        paramQueue[existing][1] = v;
+    } else {
+        paramQueue.push([key, v]);
+    }
+}
+
+function drainParamQueue() {
+    let sent = 0;
+    while (paramQueue.length > 0 && sent < PARAMS_PER_TICK) {
+        const [key, value] = paramQueue.shift();
+        host_module_set_param(key, value);
+        sent++;
+    }
 }
 
 function getParam(key) {
@@ -628,7 +661,11 @@ function handlePadOn(note, velocity) {
             showOverlay(FX_NAMES[slot], 'Latched', '');
         }
     } else {
-        /* Normal punch-in: hold = on */
+        /* Normal punch-in: hold = on.
+         * If already active (missed note-off), deactivate first. */
+        if (fxActive[slot] && !fxLatched[slot]) {
+            sendParam(`punch_${slot}_off`, '1');
+        }
         fxActive[slot] = true;
         sendParam(`punch_${slot}_on`, velNorm);
     }
@@ -655,7 +692,8 @@ function handlePadOff(note) {
     refreshPadLED(slot);
 }
 
-let lastPressureTime = 0;
+/* Per-slot pressure throttle so simultaneous pad presses don't starve each other */
+const lastPressureTime = new Array(NUM_SLOTS).fill(0);
 const PRESSURE_THROTTLE_MS = 30; /* Don't send pressure faster than ~33Hz */
 
 function handleAftertouch(note, pressure) {
@@ -663,11 +701,10 @@ function handleAftertouch(note, pressure) {
     if (slot === undefined) return;
     if (!fxActive[slot]) return;
 
-    /* Throttle pressure updates to avoid flooding the param system.
-     * The DSP plugin also gets aftertouch directly via MIDI. */
+    /* Per-slot throttle — each pad has its own timer */
     const now = Date.now();
-    if (now - lastPressureTime < PRESSURE_THROTTLE_MS) return;
-    lastPressureTime = now;
+    if (now - lastPressureTime[slot] < PRESSURE_THROTTLE_MS) return;
+    lastPressureTime[slot] = now;
 
     sendParam(`punch_${slot}_pressure`, (pressure / 127.0).toFixed(3));
 }
@@ -879,6 +916,9 @@ globalThis.tick = function() {
         return;
     }
 
+    /* Drain queued params (pressure, knob values, etc.) */
+    drainParamQueue();
+
     /* Sync step sequencer position from DSP */
     if (stepSeqActive) {
         const raw = getParam('current_step');
@@ -933,10 +973,9 @@ globalThis.onMidiMessageInternal = function(data) {
     /* Channel aftertouch - broadcast to all active punch-ins (throttled) */
     if (status === 0xD0) {
         const now = Date.now();
-        if (now - lastPressureTime < PRESSURE_THROTTLE_MS) return;
-        lastPressureTime = now;
         for (let i = 0; i < NUM_SLOTS; i++) {
-            if (fxActive[i]) {
+            if (fxActive[i] && now - lastPressureTime[i] >= PRESSURE_THROTTLE_MS) {
+                lastPressureTime[i] = now;
                 sendParam(`punch_${i}_pressure`, (d1 / 127.0).toFixed(3));
             }
         }

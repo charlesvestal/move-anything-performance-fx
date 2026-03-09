@@ -19,8 +19,14 @@ static inline float pfx_clampf(float x, float lo, float hi) {
 
 /* Pressure relative to initial hit, normalized 0.0–1.0.
  * Center (0.5) = neutral. Harder → 1.0, lighter → 0.0.
- * ±0.1 deadzone around initial. */
-static inline float pressure_relative(float pressure, float initial) {
+ * ±0.1 deadzone around initial.
+ * settle_counter: <0 or >0 means still settling → return 0.5 */
+static inline float pressure_relative(float pressure, float initial,
+                                       int settle_counter) {
+    /* During settling (waiting for aftertouch or tracking center),
+     * always return neutral so parameters don't jump on initial press */
+    if (settle_counter != 0) return 0.5f;
+
     float lo = initial - 0.1f;
     float hi = initial + 0.1f;
     if (lo < 0.0f) lo = 0.0f;
@@ -231,7 +237,8 @@ typedef struct {
     /* Per-type DSP state — allocated/used based on slot type */
     /* Repeat FX (slots 0-7) */
     repeat_t repeat;
-    tape_stop_t tape;     /* also used for half-speed, tape stop, vinyl brake */
+    tape_stop_t tape;     /* also used for tape stop, vinyl brake */
+    void *bungee;         /* pfx_bungee_t* for timestretch slot */
 
     /* Filter FX (slots 8-15) */
     svf_t filter_l;
