@@ -242,31 +242,7 @@ function getStatePath() {
 }
 
 function saveState() {
-    const state = {
-        version: 8,
-        fxLatched: fxLatched,
-        slotParams: slotParams,
-        globalValues: globalValues,
-        lastTouchedSlot: lastTouchedSlot,
-        lastRepeatSlot: lastRepeatSlot,
-        bpm: bpm
-    };
-
-    const dspState = getParam('state');
-
-    const fullState = {
-        ui: state,
-        dsp: dspState || ''
-    };
-
-    try {
-        const path = getStatePath();
-        const dir = path.substring(0, path.lastIndexOf('/'));
-        host_ensure_dir(dir);
-        host_write_file(path, JSON.stringify(fullState));
-    } catch (e) {
-        /* ignore save errors */
-    }
+    /* State persistence disabled for now */
 }
 
 function loadState() {
@@ -893,17 +869,12 @@ function syncFxState() {
 globalThis.init = function() {
     console.log('Performance FX v2 module initializing');
 
-    detectSetUUID();
-    stateLoaded = loadState();
-
-    if (!stateLoaded) {
-        /* Fresh start - push defaults */
-        sendParam('bpm', String(bpm));
-        sendParam('audio_source', '1');
-        for (let i = 0; i < NUM_GLOBALS; i++) {
-            if (GLOBAL_KEYS[i] === 'rpt_toggle') continue;
-            sendParam(GLOBAL_KEYS[i], GLOBAL_DEFAULTS[i].toFixed(3));
-        }
+    /* State persistence disabled — always start fresh */
+    sendParam('bpm', String(bpm));
+    sendParam('audio_source', '1');
+    for (let i = 0; i < NUM_GLOBALS; i++) {
+        if (GLOBAL_KEYS[i] === 'rpt_toggle') continue;
+        sendParam(GLOBAL_KEYS[i], GLOBAL_DEFAULTS[i].toFixed(3));
     }
 
     ledInitPending = true;

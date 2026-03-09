@@ -805,19 +805,28 @@ static void process_beat_repeat(pfx_slot_t *s, int slot, float *l, float *r,
 
     if (rp->read_pos >= rp->repeat_len) {
         rp->read_pos = 0;
-        /* At loop boundary, check if rate knob (repeat_rate) has changed */
+    }
+
+    /* Check if rate knob changed — apply at loop boundary or wrap.
+     * Changing mid-loop just adjusts repeat_len so the loop wraps sooner/later.
+     * Only re-capture when crossing the boundary. */
+    {
         int new_len = pfx_rate_to_samples(e->repeat_rate);
         if (new_len < 64) new_len = 64;
         if (new_len > rp->buf_len) new_len = rp->buf_len;
         if (new_len != rp->repeat_len) {
-            /* Re-capture fresh audio from row4 into private buffer */
-            int src_start = (e->row4_write_pos - new_len + e->row4_buf_len) % e->row4_buf_len;
-            for (int i = 0; i < new_len; i++) {
-                int src = (src_start + i) % e->row4_buf_len;
-                rp->buf_l[i] = e->row4_buf_l[src];
-                rp->buf_r[i] = e->row4_buf_r[src];
+            if (rp->read_pos == 0) {
+                /* At loop start — re-capture at new length */
+                int src_start = (e->row4_write_pos - new_len + e->row4_buf_len) % e->row4_buf_len;
+                for (int i = 0; i < new_len; i++) {
+                    int src = (src_start + i) % e->row4_buf_len;
+                    rp->buf_l[i] = e->row4_buf_l[src];
+                    rp->buf_r[i] = e->row4_buf_r[src];
+                }
             }
             rp->repeat_len = new_len;
+            /* If read_pos is now past the new length, wrap immediately */
+            if (rp->read_pos >= new_len) rp->read_pos = rp->read_pos % new_len;
         }
     }
 }
