@@ -17,6 +17,24 @@ static inline float pfx_clampf(float x, float lo, float hi) {
     return x < lo ? lo : (x > hi ? hi : x);
 }
 
+/* Pressure relative to initial hit, normalized 0.0–1.0.
+ * Center (0.5) = neutral. Harder → 1.0, lighter → 0.0.
+ * ±0.1 deadzone around initial. */
+static inline float pressure_relative(float pressure, float initial) {
+    float lo = initial - 0.1f;
+    float hi = initial + 0.1f;
+    if (lo < 0.0f) lo = 0.0f;
+    if (hi > 1.0f) hi = 1.0f;
+    if (pressure >= lo && pressure <= hi) return 0.5f;
+    if (pressure > hi) {
+        float range = 1.0f - hi;
+        if (range < 0.01f) return 0.5f;
+        return 0.5f + 0.5f * (pressure - hi) / range;
+    }
+    if (lo < 0.01f) return 0.5f;
+    return 0.5f * pressure / lo;
+}
+
 #define PFX_SAMPLE_RATE     44100
 #define PFX_BLOCK_SIZE      128
 #define PFX_MAX_DELAY       (PFX_SAMPLE_RATE * 4)   /* 4 seconds */
@@ -196,8 +214,10 @@ typedef struct {
     int latched;          /* 1 = stays active after release */
     int tail_active;      /* 1 = space FX tail still decaying */
     float pressure;       /* 0..1 current pressure */
-    float velocity;       /* 0..1 note-on velocity */
+    float velocity;       /* 0..1 note-on velocity (initial center for pressure_relative) */
     float phase;          /* 0..1 animation phase (filter sweeps) */
+    int settle_counter;   /* samples remaining in settling window */
+    float settle_peak;    /* peak pressure seen during settling */
     float params[PFX_SLOT_PARAMS];  /* per-FX params (E1-E4) */
 
     /* Fade state for smooth transitions */

@@ -215,18 +215,17 @@ static void fx_set_param(void *instance, const char *key, const char *val) {
         suffix++;
         if (strcmp(suffix, "on") == 0) {
             pfx_activate(e, slot, fval > 0.0f ? fval : 0.7f);
-            /* Log repeat activation diagnostics */
-            if (slot >= FX_RPT_1_4 && slot <= FX_STUTTER) {
-                pfx_slot_t *s = &e->slots[slot];
-                log_msg("pfx: RPT slot=%d bpm=%.1f repeat_len=%d (%.0fms) capturing=%d",
-                        slot, e->bpm, s->repeat.repeat_len,
-                        (float)s->repeat.repeat_len / 44100.0f * 1000.0f,
-                        s->repeat.capturing);
-            }
+            log_msg("pfx: ON slot=%d vel=%.3f", slot, fval);
         } else if (strcmp(suffix, "off") == 0) {
             pfx_deactivate(e, slot);
+            log_msg("pfx: OFF slot=%d", slot);
         } else if (strcmp(suffix, "pressure") == 0) {
             pfx_set_pressure(e, slot, fval);
+            /* Log pressure with settling state */
+            pfx_slot_t *s = &e->slots[slot];
+            log_msg("pfx: PRES slot=%d p=%.3f vel=%.3f settle=%d pr=%.3f",
+                    slot, s->pressure, s->velocity, s->settle_counter,
+                    pressure_relative(s->pressure, s->velocity));
         } else if (strcmp(suffix, "latch") == 0) {
             pfx_set_latched(e, slot, ival);
         } else if (strncmp(suffix, "param_", 6) == 0) {

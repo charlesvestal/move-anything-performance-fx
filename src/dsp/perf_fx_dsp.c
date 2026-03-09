@@ -48,32 +48,6 @@ static inline float white_noise(unsigned int *seed) {
 }
 
 /*
- * Pressure relative to initial hit, normalized to 0.0–1.0.
- * Initial hit = 0.5 (center). Pressing harder → 1.0. Lighter → 0.0.
- * ±0.1 deadzone around initial value stays at 0.5.
- *
- * Use this for ALL pressure-driven parameters so the initial tap
- * always feels "neutral" regardless of how hard you press.
- */
-static inline float pressure_relative(float pressure, float initial) {
-    float lo = initial - 0.1f;
-    float hi = initial + 0.1f;
-    if (lo < 0.0f) lo = 0.0f;
-    if (hi > 1.0f) hi = 1.0f;
-
-    if (pressure >= lo && pressure <= hi)
-        return 0.5f;  /* deadzone → center */
-    if (pressure > hi) {
-        float range = 1.0f - hi;
-        if (range < 0.01f) return 0.5f;
-        return 0.5f + 0.5f * (pressure - hi) / range;  /* 0.5→1.0 */
-    }
-    /* pressure < lo */
-    if (lo < 0.01f) return 0.5f;
-    return 0.5f * pressure / lo;  /* 0.0→0.5 */
-}
-
-/*
  * Pressure-relative volume gain (convenience wrapper).
  * Center (0.5) = 1.0x, max (1.0) = 2.0x, min (0.0) = 0.0x.
  */
@@ -439,9 +413,14 @@ void pfx_activate(perf_fx_engine_t *e, int slot, float velocity) {
     s->fading_out = 0;
     s->tail_active = 0;
     s->tail_silence_count = 0;
-    s->velocity = velocity;
-    s->pressure = velocity;
+    s->velocity = 0.5f;  /* temporary center until first aftertouch arrives */
+    s->pressure = 0.0f;  /* no pressure yet — aftertouch comes separately */
     s->phase = 0.0f;
+
+    /* Settling: -1 means "waiting for first aftertouch".
+     * Once first aftertouch arrives, starts counting down from settle window.
+     * During settling, velocity tracks pressure so pressure_relative = 0.5. */
+    s->settle_counter = -1;
     e->last_touched_slot = slot;
 
     /* Reset filter state */
@@ -608,7 +587,17 @@ void pfx_set_pressure(perf_fx_engine_t *e, int slot, float pressure) {
     pfx_slot_t *s = &e->slots[slot];
     s->pressure = clampf(pressure, 0.0f, 1.0f);
 
-    /* Per-FX pressure mappings are applied during processing */
+    /* Settling: track pressure as center point so pressure_relative
+     * returns 0.5 (neutral). Once settled, center locks.
+     * -1 = waiting for first aftertouch (start settle window now).
+     * >0 = settling in progress, track pressure as center. */
+    if (s->settle_counter == -1) {
+        /* First aftertouch arrived — start settling window */
+        s->settle_counter = PFX_SAMPLE_RATE / 5;  /* 200ms */
+        s->velocity = s->pressure;
+    } else if (s->settle_counter > 0) {
+        s->velocity = s->pressure;
+    }
 }
 
 void pfx_set_param(perf_fx_engine_t *e, int slot, int idx, float val) {
@@ -1022,8 +1011,8 @@ static void advance_filter_phase(pfx_slot_t *s, int slot) {
     switch (slot) {
         case FX_LP_SWEEP_DOWN:
         case FX_HP_SWEEP_UP:
-            /* Pressure -> sweep speed (harder = faster) */
-            base_rate *= (0.5f + pr * 3.0f);
+            /* Fixed sweep speed — pressure controls filter opening, not speed */
+            base_rate *= 1.5f;
             break;
         case FX_BP_RISE:
         case FX_BP_FALL:
@@ -1041,20 +1030,37 @@ static void advance_filter_phase(pfx_slot_t *s, int slot) {
     }
 
     s->phase += base_rate;
-    /* For looping FX (phaser, flanger, auto filter), wrap phase */
-    if (slot == FX_PHASER || slot == FX_FLANGER || slot == FX_AUTO_FILTER) {
+    /* LP/HP sweeps: triangle oscillation (0→1→0→1...) */
+    if (slot == FX_LP_SWEEP_DOWN || slot == FX_HP_SWEEP_UP) {
+        if (s->phase >= 2.0f) s->phase -= 2.0f;
+    }
+    /* Looping FX (phaser, flanger, auto filter): wrap phase */
+    else if (slot == FX_PHASER || slot == FX_FLANGER || slot == FX_AUTO_FILTER) {
         if (s->phase >= 1.0f) s->phase -= 1.0f;
     } else {
-        /* For sweep FX, clamp at 1.0 */
+        /* Other sweep FX: clamp at 1.0 */
         if (s->phase > 1.0f) s->phase = 1.0f;
     }
 }
 
 static void process_lp_sweep_down(pfx_slot_t *s, float *l, float *r) {
-    /* Phase 0 = open (cutoff=1), phase 1 = closed (cutoff=0.05) */
-    float cutoff = 1.0f - s->phase * 0.95f;
+    /* Triangle phase: 0→1 sweeps down, 1→2 sweeps back up */
+    float tri = s->phase < 1.0f ? s->phase : 2.0f - s->phase;
+
+    /* Base sweep: open (tri=0) → nearly closed (tri=1) */
+    float sweep_cutoff = 1.0f - tri * 0.95f;  /* 1.0 → 0.05 */
+
+    /* Pressure opens the filter (inverse): harder press = higher cutoff.
+     * At center (0.5) = no offset. Above center = pushes cutoff up. */
+    float pr = pressure_relative(s->pressure, s->velocity);
+    float pressure_offset = (pr - 0.5f) * 1.5f;  /* -0.75 to +0.75 */
+
+    float cutoff = sweep_cutoff + pressure_offset;
+    if (cutoff < 0.02f) cutoff = 0.02f;
+    if (cutoff > 1.0f) cutoff = 1.0f;
+
     float f = cutoff_to_f(cutoff);
-    float q = 0.2f + s->phase * 0.5f; /* resonance increases as it sweeps down */
+    float q = 0.2f + tri * 0.5f; /* resonance increases as it sweeps down */
     float out_l, out_r;
     svf_process(&s->filter_l, *l, f, q, &out_l, NULL, NULL);
     svf_process(&s->filter_r, *r, f, q, &out_r, NULL, NULL);
@@ -1062,10 +1068,22 @@ static void process_lp_sweep_down(pfx_slot_t *s, float *l, float *r) {
 }
 
 static void process_hp_sweep_up(pfx_slot_t *s, float *l, float *r) {
-    /* Phase 0 = no HP (cutoff=0), phase 1 = full HP (cutoff=0.9) */
-    float cutoff = s->phase * 0.9f;
+    /* Triangle phase: 0→1 sweeps up, 1→2 sweeps back down */
+    float tri = s->phase < 1.0f ? s->phase : 2.0f - s->phase;
+
+    /* Base sweep: open (tri=0) → high-passed (tri=1) */
+    float sweep_cutoff = tri * 0.9f;  /* 0.0 → 0.9 */
+
+    /* Pressure pushes cutoff higher (harder = more HP) */
+    float pr = pressure_relative(s->pressure, s->velocity);
+    float pressure_offset = (pr - 0.5f) * 1.0f;
+
+    float cutoff = sweep_cutoff + pressure_offset;
+    if (cutoff < 0.0f) cutoff = 0.0f;
+    if (cutoff > 0.95f) cutoff = 0.95f;
+
     float f = cutoff_to_f(cutoff);
-    float q = 0.2f + s->phase * 0.4f;
+    float q = 0.2f + tri * 0.4f;
     float out_l, out_r;
     svf_process(&s->filter_l, *l, f, q, NULL, &out_l, NULL);
     svf_process(&s->filter_r, *r, f, q, NULL, &out_r, NULL);
@@ -1682,6 +1700,9 @@ static void process_active_slot(perf_fx_engine_t *e, int i, float *l, float *r) 
     int is_tail = s->tail_active;
 
     if (!is_active && !is_tail) return;
+
+    /* Count down settling window */
+    if (s->settle_counter > 0) s->settle_counter--;
 
     float dry_l = *l;
     float dry_r = *r;
