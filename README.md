@@ -1,10 +1,10 @@
 # Move Everything Performance FX
 
-Live punch-in audio effects processor for [Move Everything](https://github.com/charlesvestal/move-anything) on Ableton Move hardware. 32 pressure-sensitive FX pads with latching.
+Live punch-in audio effects processor for [Move Everything](https://github.com/charlesvestal/move-everything) on Ableton Move hardware. 32 pressure-sensitive FX pads with latching.
 
 ## Prerequisites
 
-- [Move Everything](https://github.com/charlesvestal/move-anything) v0.7.10+ installed on your Ableton Move
+- [Move Everything](https://github.com/charlesvestal/move-everything) v0.7.10+ installed on your Ableton Move
 
 ## Installation
 

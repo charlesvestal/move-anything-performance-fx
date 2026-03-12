@@ -4,7 +4,7 @@ Instructions for Claude Code when working with this repository.
 
 ## Project Overview
 
-Performance FX is a live audio effects processor overtake module for [Move Anything](https://github.com/charlesvestal/move-anything) on Ableton Move hardware. It provides 32 pressure-sensitive punch-in audio effects with latching, scene snapshots, and a step FX sequencer.
+Performance FX is a live audio effects processor overtake module for [Move Anything](https://github.com/charlesvestal/move-everything) on Ableton Move hardware. It provides 32 pressure-sensitive punch-in audio effects with latching, scene snapshots, and a step FX sequencer.
 
 Accessed via the Overtake Modules menu (Shift+Vol+Jog Click).
 
