@@ -205,7 +205,7 @@ let overlayText = '';
 let overlayParam = '';
 let overlayValue = '';
 let overlayTimer = 0;
-const OVERLAY_DURATION = 66;
+const OVERLAY_DURATION = 330;
 
 /* Throttle screen reader announce to prevent D-Bus flood on rapid knob turns */
 let lastAnnounceTime = 0;
@@ -226,7 +226,7 @@ let audioSource = 1; /* Always Move Mix */
 
 /* Persistence */
 let autosaveCounter = 0;
-const AUTOSAVE_INTERVAL = 440;
+const AUTOSAVE_INTERVAL = 2200;
 let currentSetUUID = '';
 let stateLoaded = false;
 
