@@ -28,14 +28,14 @@ import {
     MoveRow1, MoveRow2, MoveRow3, MoveRow4,
     WhiteLedOff, WhiteLedDim, WhiteLedMedium, WhiteLedBright,
     Pulse4th
-} from '/data/UserData/move-anything/shared/constants.mjs';
+} from '/data/UserData/schwung/shared/constants.mjs';
 
 import {
     isCapacitiveTouchMessage, isNoiseMessage,
     setLED, setButtonLED, decodeDelta
-} from '/data/UserData/move-anything/shared/input_filter.mjs';
+} from '/data/UserData/schwung/shared/input_filter.mjs';
 
-import { announce } from '/data/UserData/move-anything/shared/screen_reader.mjs';
+import { announce } from '/data/UserData/schwung/shared/screen_reader.mjs';
 
 /* ================================================================
  * Constants
@@ -167,7 +167,7 @@ for (let i = 0; i < 3; i++) {
 }
 
 /* Persistence paths */
-const STATE_DIR = '/data/UserData/move-anything/perf_fx_state';
+const STATE_DIR = '/data/UserData/schwung/perf_fx_state';
 
 /* ================================================================
  * State
@@ -236,7 +236,7 @@ let stateLoaded = false;
 
 function getStatePath() {
     if (currentSetUUID) {
-        return `/data/UserData/move-anything/set_state/${currentSetUUID}/perf_fx_state.json`;
+        return `/data/UserData/schwung/set_state/${currentSetUUID}/perf_fx_state.json`;
     }
     return `${STATE_DIR}/perf_fx_state.json`;
 }
@@ -316,7 +316,7 @@ function loadState() {
 
 function detectSetUUID() {
     try {
-        const raw = host_read_file('/data/UserData/move-anything/active_set.txt');
+        const raw = host_read_file('/data/UserData/schwung/active_set.txt');
         if (raw) {
             const lines = raw.split('\n');
             if (lines[0] && lines[0].length > 8) {
